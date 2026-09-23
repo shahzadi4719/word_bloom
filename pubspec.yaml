@@ -1,0 +1,50 @@
+name: my_first_app
+description: "A Flutter project for learning and building my first app."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.8.0
+  flutter: ">=3.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+
+  # For playing shoot, pop, and word match sounds
+  audioplayers: ^6.1.0
+
+  # For the "bloom" particle effect when a word is completed
+  confetti: ^0.7.0
+
+  # For saving score / unlocked level between sessions
+  shared_preferences: ^2.3.3
+
+  # For the rounded/bubble/puffy game font
+  google_fonts: ^6.2.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^6.0.0
+
+  # For generating app icons automatically
+  flutter_launcher_icons: ^0.14.4
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/images/
+    - assets/audio/
+    
+    
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/images/app_icon.png"
+  min_sdk_android: 21
