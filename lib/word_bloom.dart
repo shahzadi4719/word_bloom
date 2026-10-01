@@ -5,14 +5,16 @@ import 'package:confetti/confetti.dart';
 
 import 'game_engine.dart';
 import 'bubble.dart';
+import 'progress_service.dart';
+import 'word_dictionary.dart';
 
 class WordBloom extends StatefulWidget {
   final int startLevel;
 
   /// Called the moment a level is actually won (not just visited),
-  /// with the level number that was completed - lets the level
-  /// select screen know it's safe to unlock the next one.
-  final ValueChanged<int>? onLevelComplete;
+  /// with the level number that was completed and the number of
+  /// stars earned (1-3).
+  final void Function(int level, int stars)? onLevelComplete;
 
   const WordBloom({super.key, this.startLevel = 1, this.onLevelComplete});
 
@@ -20,35 +22,45 @@ class WordBloom extends StatefulWidget {
   State<WordBloom> createState() => _WordBloomState();
 }
 
-class _WordBloomState extends State<WordBloom>
-    with SingleTickerProviderStateMixin {
+class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
   final GameEngine _engine = GameEngine();
 
   late final AnimationController _gameLoopController;
   late final ConfettiController _confettiController;
 
+  // Board bubbles: bottom -> ceiling entrance, once per level start.
+  late final AnimationController _entranceController;
+
+  // Flying/shot bubble: gentle glow pulse.
+  late final AnimationController _flyingGlowController;
   double _aimX = 0.50;
   double _aimY = 0.12;
 
   final double _launcherX = 0.50;
   final double _launcherY = 0.90;
 
+  /// Single muzzle point used by BOTH the aim preview and the real
+  /// shot, so the line and the bubble always start from the same place.
+  Offset get _muzzle => Offset(_launcherX, _launcherY - 0.10);
+
   bool _initialized = false;
   bool _confettiPlayed = false;
 
-  // Shown only on level 1, before the player's very first shot -
-  // teaches the drag-to-aim / release-to-shoot mechanic. This is
-  // pure UI teaching (an overlay + text), never gameplay assistance
-  // - it disappears the instant the player starts dragging.
   bool _showTutorial = false;
-
-  // The aiming line only shows up while the player is actively
-  // touching/dragging - not by default at the start of a level.
   bool _isAiming = false;
+  bool _isPaused = false;
 
-  @override
+  int _shotTrigger = 0;
+  int _swapTrigger = 0;
+
+    @override
   void initState() {
     super.initState();
+
+    loadWordList().then((words) {
+      debugPrint('Dictionary loaded: ${words.length} words');
+      _engine.setDictionary(words);
+    });
 
     _confettiController = ConfettiController(
       duration: const Duration(seconds: 2),
@@ -60,10 +72,21 @@ class _WordBloomState extends State<WordBloom>
     )..addListener(_gameLoopControllerListener);
 
     _gameLoopController.repeat();
+
+    _entranceController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1100),
+    );
+
+    _flyingGlowController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 850),
+    )..repeat(reverse: true);
   }
 
   void _gameLoopControllerListener() {
     if (!mounted) return;
+    if (_isPaused) return;
 
     _engine.update();
 
@@ -72,7 +95,12 @@ class _WordBloomState extends State<WordBloom>
       _confettiController.play();
       final int? completed = _engine.currentLevel?.number;
       if (completed != null) {
-        widget.onLevelComplete?.call(completed);
+        final int stars = _engine.starsEarned;
+
+        debugPrint('WordBloom: saving level $completed with $stars stars');
+        ProgressService.saveLevelResult(completed, stars);
+
+        widget.onLevelComplete?.call(completed, stars);
       }
     }
 
@@ -83,6 +111,8 @@ class _WordBloomState extends State<WordBloom>
   void dispose() {
     _gameLoopController.dispose();
     _confettiController.dispose();
+    _entranceController.dispose();
+    _flyingGlowController.dispose();
     super.dispose();
   }
 
@@ -91,7 +121,7 @@ class _WordBloomState extends State<WordBloom>
     double y = localPosition.dy / size.height;
 
     x = x.clamp(0.04, 0.96);
-    y = y.clamp(_engine.boardTopY, 0.78);
+        y = y.clamp(0.05, 0.78);
 
     setState(() {
       _aimX = x;
@@ -106,121 +136,18 @@ class _WordBloomState extends State<WordBloom>
 
     _engine.shoot(
       letter: letter,
-      startX: _launcherX,
-      startY: _launcherY - 0.10,
+      startX: _muzzle.dx,
+      startY: _muzzle.dy,
       targetX: _aimX,
       targetY: _aimY,
     );
 
-    setState(() {});
+    setState(() => _shotTrigger++);
   }
 
-  /// Builds a polyline (in normalized 0-1 space) for the dashed aim
-  /// preview. It bounces off the left/right walls at an angle just
-  /// like the real shot physics, AND stops dead the moment it would
-  /// hit an existing bubble - it never draws through/past a bubble
-  /// the way a real shot never would.
-  List<Offset> _buildTrajectory(Offset start, Offset target) {
-    final double aspect = _engine.aspect;
-
-    // Work in a "physical" space where x and y use the same pixel
-    // scale (both effectively width-based) so circle/wall geometry
-    // is correct regardless of the phone's aspect ratio.
-    Offset toPhysical(Offset p) => Offset(p.dx, p.dy / aspect);
-    Offset toNormalized(Offset p) => Offset(p.dx, p.dy * aspect);
-
-    final Offset physStart = toPhysical(start);
-    final Offset physTarget = toPhysical(target);
-
-    final List<Offset> physPoints = [physStart];
-
-    Offset direction = physTarget - physStart;
-    final double dist = direction.distance;
-    if (dist < 0.001) return [start];
-
-    Offset dir = direction / dist;
-    Offset current = physStart;
-
-    double remainingBudget = 2.4;
-    const int maxBounces = 4;
-    int bounces = 0;
-
-    final double collisionR =
-        _engine.bubbleRadius * 2; // shooter + board bubble
-    final double topPhysY = _engine.boardTopY / aspect;
-
-    while (bounces <= maxBounces && remainingBudget > 0.001) {
-      double? tWall;
-      if (dir.dx > 0.0001) {
-        tWall = (1 - current.dx) / dir.dx;
-      } else if (dir.dx < -0.0001) {
-        tWall = (0 - current.dx) / dir.dx;
-      }
-
-      double? tTop;
-      if (dir.dy < -0.0001) {
-        tTop = (topPhysY - current.dy) / dir.dy;
-      }
-
-      // Nearest bubble the ray would hit, if any.
-      double? tBubble;
-      for (final b in _engine.bubbles) {
-        final Offset c = Offset(b.x, b.y / aspect);
-        final Offset l = c - current;
-        final double tca = l.dx * dir.dx + l.dy * dir.dy;
-        if (tca < 0) continue;
-
-        final double d2 = (l.dx * l.dx + l.dy * l.dy) - tca * tca;
-        final double r2 = collisionR * collisionR;
-        if (d2 > r2) continue;
-
-        final double thc = sqrt(r2 - d2);
-        final double t0 = tca - thc;
-        if (t0 > 0.001 && (tBubble == null || t0 < tBubble)) {
-          tBubble = t0;
-        }
-      }
-
-      double tCandidate = remainingBudget;
-      bool hitWall = false;
-      bool hitTop = false;
-      bool hitBubble = false;
-
-      if (tWall != null && tWall > 0.0001 && tWall < tCandidate) {
-        tCandidate = tWall;
-        hitWall = true;
-        hitTop = false;
-        hitBubble = false;
-      }
-      if (tTop != null && tTop > 0.0001 && tTop < tCandidate) {
-        tCandidate = tTop;
-        hitWall = false;
-        hitTop = true;
-        hitBubble = false;
-      }
-      if (tBubble != null && tBubble > 0.0001 && tBubble < tCandidate) {
-        tCandidate = tBubble;
-        hitWall = false;
-        hitTop = false;
-        hitBubble = true;
-      }
-
-      final Offset next = current + dir * tCandidate;
-      physPoints.add(next);
-      remainingBudget -= tCandidate;
-      current = next;
-
-      // Stop for good on hitting a bubble or the ceiling - that's
-      // exactly where a real shot would come to rest.
-      if (hitTop || hitBubble || (!hitWall && !hitTop && !hitBubble)) break;
-
-      if (hitWall) {
-        dir = Offset(-dir.dx, dir.dy);
-        bounces++;
-      }
-    }
-
-    return physPoints.map(toNormalized).toList();
+  void _handleSwap() {
+    _engine.swapNextTwo();
+    setState(() => _swapTrigger++);
   }
 
   Color _bubbleColor(String letter) {
@@ -240,6 +167,37 @@ class _WordBloomState extends State<WordBloom>
     setState(() {});
   }
 
+  void _openPauseMenu() {
+    if (_engine.gameOver || _engine.levelComplete) return;
+
+    setState(() => _isPaused = true);
+
+    showDialog(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.55),
+      builder: (dialogContext) => _PauseDialog(
+        score: _engine.score,
+        onResume: () {
+          Navigator.of(dialogContext).pop();
+          if (mounted) setState(() => _isPaused = false);
+        },
+        onRetry: () {
+          Navigator.of(dialogContext).pop();
+          if (mounted) {
+            setState(() => _isPaused = false);
+            _restartAndRetry();
+          }
+        },
+        onExit: () {
+          Navigator.of(dialogContext).pop();
+          Navigator.of(context).maybePop();
+        },
+      ),
+    ).then((_) {
+      if (mounted && _isPaused) setState(() => _isPaused = false);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -255,13 +213,15 @@ class _WordBloomState extends State<WordBloom>
               _initialized = true;
               _aimY = _engine.boardTopY + 0.05;
               _showTutorial = widget.startLevel == 1;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) _entranceController.forward(from: 0);
+              });
             }
 
             return GestureDetector(
               behavior: HitTestBehavior.opaque,
-              // Touch anywhere to start aiming - the dashed line
-              // only appears from this point on, not by default.
               onPanStart: (details) {
+                if (_isPaused) return;
                 _updateAim(details.localPosition, size);
                 setState(() {
                   _isAiming = true;
@@ -269,19 +229,20 @@ class _WordBloomState extends State<WordBloom>
                 });
               },
               onPanUpdate: (details) {
+                if (_isPaused) return;
                 _updateAim(details.localPosition, size);
               },
               onPanEnd: (_) {
+                if (_isPaused) return;
                 if (_isAiming) _shoot();
                 setState(() => _isAiming = false);
               },
               onPanCancel: () {
+                if (_isPaused) return;
                 setState(() => _isAiming = false);
               },
               child: Stack(
                 children: [
-                  // Simple soft gradient - the game screen no longer
-                  // uses the home screen's background artwork.
                   Positioned.fill(
                     child: Container(
                       decoration: const BoxDecoration(
@@ -304,46 +265,39 @@ class _WordBloomState extends State<WordBloom>
                       score: _engine.score,
                       lives: _remainingShots,
                       onBack: () => Navigator.of(context).maybePop(),
-                    ),
-                  ),
-
-                  // SINGLE ACTIVE HINT
-                  Positioned(
-                    top: 74,
-                    left: 20,
-                    right: 20,
-                    child: _ActiveHint(
-                      words: _engine.currentLevel?.words ?? [],
-                      hints: _engine.currentLevel?.hints ?? [],
-                      showHints: _engine.currentLevel?.showHints ?? true,
-                      completedWords: _engine.completedWords,
+                      onPause: _openPauseMenu,
                     ),
                   ),
 
                   // GAME BOARD
                   Positioned.fill(
-                    child: CustomPaint(
-                      painter: _GameBoardPainter(
-                        bubbles: _engine.bubbles,
-                        flyingBubble: _engine.flyingBubble,
-                      ),
+                    child: AnimatedBuilder(
+                      animation: Listenable.merge([
+                        _entranceController,
+                        _flyingGlowController,
+                      ]),
+                      builder: (context, _) {
+                        return CustomPaint(
+                          painter: _GameBoardPainter(
+                            bubbles: _engine.bubbles,
+                            flyingBubble: _engine.flyingBubble,
+                            entranceProgress: _entranceController.value,
+                            flyingPulse: _flyingGlowController.value,
+                          ),
+                        );
+                      },
                     ),
                   ),
 
-                  // BUBBLES FLYING TO THE BASKET
+                  // BUBBLE POP EFFECT
                   Positioned.fill(
                     child: CustomPaint(
-                      painter: _FlyingPopPainter(
-                        pops: _engine.flyingPops,
-                        basketX: _engine.basketX,
-                        basketY: _engine.basketY,
-                      ),
+                      painter: _FlyingPopPainter(pops: _engine.flyingPops),
                     ),
                   ),
 
-                  // AIMING LINE - only while actively touching/dragging,
-                  // bounces off the side walls at an angle like a real
-                  // bubble shooter instead of a plain straight line.
+                  // AIMING LINE - drawn from the engine's own simulation,
+                  // so it is exactly the path (and landing slot) of the shot.
                   if (_isAiming &&
                       !_engine.gameOver &&
                       !_engine.levelComplete &&
@@ -351,103 +305,40 @@ class _WordBloomState extends State<WordBloom>
                     Positioned.fill(
                       child: CustomPaint(
                         painter: _AimingLinePainter(
-                          points: _buildTrajectory(
-                            Offset(_launcherX, _launcherY - 0.10),
-                            Offset(_aimX, _aimY),
-                          ),
+                          points: _engine
+                              .previewShot(
+                                letter: _engine.getNextLetterPreview(),
+                                startX: _muzzle.dx,
+                                startY: _muzzle.dy,
+                                targetX: _aimX,
+                                targetY: _aimY,
+                              )
+                              .path,
                           color: _bubbleColor(_engine.getNextLetterPreview()),
                         ),
                       ),
                     ),
 
-                  // BASKET (bottom-left) - matches engine.basketX/Y
-                  Align(
-                    alignment: const Alignment(-0.74, 0.80),
-                    child: _Basket(count: _engine.collectedLetters.length),
-                  ),
-
-                  // FLOWER CANNON
+                  // BUBBLE LAUNCHER RING
                   Positioned(
                     left: 0,
                     right: 0,
                     bottom: 0,
                     child: SizedBox(
                       height: 210,
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          Positioned.fill(
-                            child: CustomPaint(
-                              painter: _FlowerLauncherPainter(
-                                color: _bubbleColor(
-                                  _engine.getNextLetterPreview(),
-                                ),
-                              ),
-                            ),
-                          ),
-                          Positioned.fill(
-                            child: Align(
-                              alignment: const Alignment(0, 0.06),
-                              child: _GlossyBubble(
-                                letter: _engine.getNextLetterPreview(),
-                                color: _bubbleColor(
-                                  _engine.getNextLetterPreview(),
-                                ),
-                                size: 78,
-                              ),
-                            ),
-                          ),
-                          Positioned.fill(
-                            child: Align(
-                              alignment: const Alignment(0.62, 0.42),
-                              // Tapping the "NEXT" preview swaps it
-                              // with the ball about to be fired -
-                              // lets the player fix a bad draw
-                              // instead of being stuck with it.
-                              child: GestureDetector(
-                                behavior: HitTestBehavior.opaque,
-                                onTap: () {
-                                  _engine.swapNextTwo();
-                                  setState(() {});
-                                },
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: const [
-                                        Text(
-                                          'NEXT',
-                                          style: TextStyle(
-                                            fontSize: 9,
-                                            fontWeight: FontWeight.w900,
-                                            letterSpacing: 1.4,
-                                            color: Color(0xFF5B4636),
-                                          ),
-                                        ),
-                                        SizedBox(width: 3),
-                                        Icon(
-                                          Icons.swap_horiz_rounded,
-                                          size: 12,
-                                          color: Color(0xFF5B4636),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 4),
-                                    _GlossyBubble(
-                                      letter: _engine
-                                          .getLetterAfterNextPreview(),
-                                      color: _bubbleColor(
-                                        _engine.getLetterAfterNextPreview(),
-                                      ),
-                                      size: 40,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
+                      child: _LauncherRing(
+                        currentLetter: _engine.getNextLetterPreview(),
+                        nextLetter: _engine.getLetterAfterNextPreview(),
+                        currentColor: _bubbleColor(
+                          _engine.getNextLetterPreview(),
+                        ),
+                        nextColor: _bubbleColor(
+                          _engine.getLetterAfterNextPreview(),
+                        ),
+                        shotsRemaining: _remainingShots,
+                        shotTrigger: _shotTrigger,
+                        swapTrigger: _swapTrigger,
+                        onSwapTap: _handleSwap,
                       ),
                     ),
                   ),
@@ -459,7 +350,11 @@ class _WordBloomState extends State<WordBloom>
                       left: 0,
                       right: 0,
                       child: Center(
-                        child: _FoundWord(word: _engine.foundWord!),
+                        child: _FoundWord(
+                          word: _engine.foundWord!,
+                          done: _engine.completedWords.length,
+                          total: _engine.currentLevel?.words.length ?? 1,
+                        ),
                       ),
                     ),
 
@@ -482,12 +377,7 @@ class _WordBloomState extends State<WordBloom>
                       ),
                     ),
 
-                  // FIRST-SHOT TUTORIAL - pure UI teaching (drag to
-                  // aim, release to shoot). Only ever shown once, on
-                  // level 1, before the player's first drag. Taps
-                  // pass through to the game beneath it except on
-                  // the "GOT IT" button, so a player who just starts
-                  // dragging dismisses it naturally too.
+                  // FIRST-SHOT TUTORIAL
                   if (_showTutorial)
                     Positioned.fill(
                       child: IgnorePointer(
@@ -511,9 +401,7 @@ class _WordBloomState extends State<WordBloom>
 }
 
 // ================================================================
-// FIRST-SHOT TUTORIAL - teaches the mechanic, never plays for the
-// player. Non-interactive (IgnorePointer) so the very drag it's
-// teaching also dismisses it - no separate button needed.
+// FIRST-SHOT TUTORIAL
 // ================================================================
 
 class _TutorialOverlay extends StatefulWidget {
@@ -546,8 +434,6 @@ class _TutorialOverlayState extends State<_TutorialOverlay>
       color: Colors.black.withValues(alpha: 0.32),
       child: Stack(
         children: [
-          // Instruction card near the top, clear of the hint box
-          // and clear of where the demo hand moves.
           Align(
             alignment: const Alignment(0, -0.62),
             child: Container(
@@ -578,7 +464,7 @@ class _TutorialOverlayState extends State<_TutorialOverlay>
                   ),
                   SizedBox(height: 3),
                   Text(
-                    'Connect letters to spell the word above',
+                    'Connect the letters to make a word',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 12,
@@ -590,9 +476,6 @@ class _TutorialOverlayState extends State<_TutorialOverlay>
               ),
             ),
           ),
-
-          // Animated hand sliding from the launcher up toward an
-          // aim point, looping, to demonstrate the drag gesture.
           AnimatedBuilder(
             animation: _controller,
             builder: (context, child) {
@@ -626,12 +509,14 @@ class _TopBar extends StatelessWidget {
   final int score;
   final int lives;
   final VoidCallback onBack;
+  final VoidCallback onPause;
 
   const _TopBar({
     required this.level,
     required this.score,
     required this.lives,
     required this.onBack,
+    required this.onPause,
   });
 
   @override
@@ -732,10 +617,13 @@ class _TopBar extends StatelessWidget {
         const SizedBox(width: 8),
         _GlassBox(
           padding: const EdgeInsets.all(9),
-          child: const Icon(
-            Icons.pause_rounded,
-            size: 18,
-            color: Color(0xFF292929),
+          child: GestureDetector(
+            onTap: onPause,
+            child: const Icon(
+              Icons.pause_rounded,
+              size: 18,
+              color: Color(0xFF292929),
+            ),
           ),
         ),
       ],
@@ -744,90 +632,329 @@ class _TopBar extends StatelessWidget {
 }
 
 // ================================================================
-// SINGLE ACTIVE HINT - only the current word's clue is ever shown
+// PAUSE DIALOG
 // ================================================================
 
-class _ActiveHint extends StatelessWidget {
-  final List<String> words;
-  final List<String> hints;
-  final bool showHints;
-  final List<String> completedWords;
+class _PauseDialog extends StatefulWidget {
+  final int score;
+  final VoidCallback onResume;
+  final VoidCallback onRetry;
+  final VoidCallback onExit;
 
-  const _ActiveHint({
-    required this.words,
-    required this.hints,
-    required this.showHints,
-    required this.completedWords,
+  const _PauseDialog({
+    required this.score,
+    required this.onResume,
+    required this.onRetry,
+    required this.onExit,
+  });
+
+  @override
+  State<_PauseDialog> createState() => _PauseDialogState();
+}
+
+class _PauseDialogState extends State<_PauseDialog> {
+  bool _musicOn = true;
+  bool _soundOn = true;
+  bool _vibrateOn = true;
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 28),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            padding: const EdgeInsets.fromLTRB(20, 28, 20, 24),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0xFFFFDCEA), Color(0xFFFFC2DC)],
+              ),
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(color: Colors.white, width: 3),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.25),
+                  blurRadius: 20,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Pause',
+                  style: TextStyle(
+                    fontSize: 26,
+                    fontWeight: FontWeight.w900,
+                    color: Color(0xFF7A4A3A),
+                    shadows: [Shadow(color: Colors.white, blurRadius: 4)],
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Score: ${widget.score}',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF9C6E5C),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.45),
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: Column(
+                    children: [
+                      _PauseToggleRow(
+                        icon: Icons.music_note_rounded,
+                        label: 'Music',
+                        value: _musicOn,
+                        onChanged: (v) => setState(() => _musicOn = v),
+                      ),
+                      const SizedBox(height: 14),
+                      _PauseToggleRow(
+                        icon: Icons.volume_up_rounded,
+                        label: 'Sound',
+                        value: _soundOn,
+                        onChanged: (v) => setState(() => _soundOn = v),
+                      ),
+                      const SizedBox(height: 14),
+                      _PauseToggleRow(
+                        icon: Icons.vibration_rounded,
+                        label: 'Vibrate',
+                        value: _vibrateOn,
+                        onChanged: (v) => setState(() => _vibrateOn = v),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 22),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _PauseActionButton(
+                        label: 'Retry',
+                        colors: const [Color(0xFFFF9BC4), Color(0xFFFF4D96)],
+                        onTap: widget.onRetry,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _PauseActionButton(
+                        label: 'Exit',
+                        colors: const [Color(0xFFEE8A7C), Color(0xFFE0554C)],
+                        onTap: widget.onExit,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          Positioned(
+            top: -14,
+            right: -8,
+            child: GestureDetector(
+              onTap: widget.onResume,
+              child: Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: const Color(0xFFE0554C),
+                  border: Border.all(color: Colors.white, width: 3),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.25),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
+                child: const Icon(
+                  Icons.close_rounded,
+                  color: Colors.white,
+                  size: 24,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PauseToggleRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  const _PauseToggleRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) {
-    // Find the first word that hasn't been solved yet - that's the
-    // only one we show a clue for.
-    int activeIndex = -1;
-    for (int i = 0; i < words.length; i++) {
-      if (!completedWords.contains(words[i])) {
-        activeIndex = i;
-        break;
-      }
-    }
-
-    if (activeIndex == -1) {
-      // Every word is solved - nothing left to hint at.
-      return const SizedBox.shrink();
-    }
-
-    final String word = words[activeIndex];
-    final String hint = activeIndex < hints.length ? hints[activeIndex] : '';
-
-    final String label = showHints && hint.isNotEmpty
-        ? hint
-        : List.filled(word.length, '_').join(' ');
-
     return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        // Small dots showing overall progress (e.g. found 0 of 2)
-        // without revealing any letters.
-        for (int i = 0; i < words.length; i++)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 2),
-            child: Container(
-              width: 8,
-              height: 8,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: completedWords.contains(words[i])
-                    ? const Color(0xFFFF6FAE)
-                    : Colors.white.withValues(alpha: 0.6),
-                border: Border.all(color: Colors.white, width: 1),
+        Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFFFFE7D6), Color(0xFFFFC79B)],
+            ),
+            border: Border.all(color: Colors.white, width: 2),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.12),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
               ),
+            ],
+          ),
+          child: Icon(icon, color: const Color(0xFF7A4A3A), size: 22),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Text(
+            label,
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+              color: Color(0xFF7A4A3A),
+              letterSpacing: 0.3,
             ),
           ),
-        const SizedBox(width: 8),
-        Flexible(
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        ),
+        GestureDetector(
+          onTap: () => onChanged(!value),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            width: 68,
+            height: 34,
+            padding: const EdgeInsets.all(3),
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.75),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.85)),
-            ),
-            child: Text(
-              label,
-              textAlign: TextAlign.center,
-              overflow: TextOverflow.ellipsis,
-              maxLines: 2,
-              style: const TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w800,
-                color: Color(0xFF292929),
-                letterSpacing: 0.4,
+              borderRadius: BorderRadius.circular(20),
+              gradient: LinearGradient(
+                colors: value
+                    ? const [Color(0xFFFF9BC4), Color(0xFFFF4D96)]
+                    : const [Color(0xFFBFA093), Color(0xFF9C7C6E)],
               ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.15),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                AnimatedAlign(
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOut,
+                  alignment:
+                      value ? Alignment.centerLeft : Alignment.centerRight,
+                  child: Padding(
+                    padding: EdgeInsets.only(
+                      left: value ? 6 : 0,
+                      right: value ? 0 : 6,
+                    ),
+                    child: Text(
+                      value ? 'On' : 'Off',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
+                ),
+                AnimatedAlign(
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOut,
+                  alignment:
+                      value ? Alignment.centerRight : Alignment.centerLeft,
+                  child: Container(
+                    width: 26,
+                    height: 26,
+                    decoration: const BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
       ],
+    );
+  }
+}
+
+class _PauseActionButton extends StatelessWidget {
+  final String label;
+  final List<Color> colors;
+  final VoidCallback onTap;
+
+  const _PauseActionButton({
+    required this.label,
+    required this.colors,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 52,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(colors: colors),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: Colors.white, width: 2),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.20),
+              blurRadius: 8,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 16,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 0.6,
+          ),
+        ),
+      ),
     );
   }
 }
@@ -867,153 +994,65 @@ class _GlassBox extends StatelessWidget {
 }
 
 // ================================================================
-// BASKET
+// POP EFFECT
 // ================================================================
-
-class _Basket extends StatelessWidget {
-  final int count;
-  const _Basket({required this.count});
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 64,
-      height: 58,
-      child: Stack(
-        clipBehavior: Clip.none,
-        alignment: Alignment.center,
-        children: [
-          CustomPaint(size: const Size(64, 50), painter: _BasketPainter()),
-          if (count > 0)
-            Positioned(
-              top: -6,
-              right: -2,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFF4D96),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.white, width: 1.4),
-                ),
-                child: Text(
-                  '$count',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _BasketPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final Path basket = Path();
-    basket.moveTo(size.width * 0.08, size.height * 0.42);
-    basket.lineTo(size.width * 0.92, size.height * 0.42);
-    basket.lineTo(size.width * 0.80, size.height * 0.98);
-    basket.lineTo(size.width * 0.20, size.height * 0.98);
-    basket.close();
-
-    final Paint basketPaint = Paint()
-      ..shader = const LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: [Color(0xFFE8B784), Color(0xFFC98F55)],
-      ).createShader(Rect.fromLTWH(0, 0, size.width, size.height));
-    canvas.drawPath(basket, basketPaint);
-
-    // Woven lines
-    final Paint weave = Paint()
-      ..color = Colors.white.withValues(alpha: 0.35)
-      ..strokeWidth = 1.4;
-    for (int i = 1; i < 4; i++) {
-      final double t = i / 4;
-      canvas.drawLine(
-        Offset(size.width * (0.10 + t * 0.06), size.height * 0.46),
-        Offset(size.width * (0.24 + t * 0.5), size.height * 0.96),
-        weave,
-      );
-    }
-
-    // Rim
-    final Paint rim = Paint()
-      ..color = const Color(0xFF8A5A34)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 4;
-    canvas.drawLine(
-      Offset(size.width * 0.06, size.height * 0.40),
-      Offset(size.width * 0.94, size.height * 0.40),
-      rim,
-    );
-
-    // Handle
-    final Paint handle = Paint()
-      ..color = const Color(0xFF8A5A34)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 3.4;
-    final Path handlePath = Path();
-    handlePath.moveTo(size.width * 0.28, size.height * 0.40);
-    handlePath.quadraticBezierTo(
-      size.width * 0.5,
-      -size.height * 0.28,
-      size.width * 0.72,
-      size.height * 0.40,
-    );
-    canvas.drawPath(handlePath, handle);
-  }
-
-  @override
-  bool shouldRepaint(covariant _BasketPainter oldDelegate) => false;
-}
-
-// ================================================================
-// FLYING POP BUBBLES (board -> basket)
-// ================================================================
-
 class _FlyingPopPainter extends CustomPainter {
   final List<FlyingPopBubble> pops;
-  final double basketX;
-  final double basketY;
 
-  const _FlyingPopPainter({
-    required this.pops,
-    required this.basketX,
-    required this.basketY,
-  });
+  const _FlyingPopPainter({required this.pops});
 
   @override
   void paint(Canvas canvas, Size size) {
     for (final fp in pops) {
-      final double t = Curves.easeIn.transform(fp.progress.clamp(0, 1));
+      final double t = Curves.easeOut.transform(fp.progress.clamp(0, 1));
 
-      final double x = fp.startX + (basketX - fp.startX) * t;
-      // Slight arc upward then down toward the basket.
-      final double arc = -0.06 * sin(pi * t);
-      final double y = fp.startY + (basketY - fp.startY) * t + arc;
+      final Offset origin = Offset(
+        fp.startX * size.width,
+        fp.startY * size.height,
+      );
 
-      final Offset center = Offset(x * size.width, y * size.height);
       final double baseRadius = 0.052 * size.width;
-      final double radius = baseRadius * (1 - t * 0.75);
-      final double opacity = 1 - (t * 0.5);
 
-      if (radius <= 0) continue;
+      final double ringRadius = baseRadius * (0.4 + t * 2.2);
+      final double ringOpacity = (1 - t) * 0.55;
+      if (ringOpacity > 0) {
+        final Paint ringPaint = Paint()
+          ..color = fp.color.withValues(alpha: ringOpacity)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = baseRadius * 0.22;
+        canvas.drawCircle(origin, ringRadius, ringPaint);
+      }
 
-      final Paint paint = Paint()
-        ..shader = RadialGradient(
-          colors: [
-            fp.color.withValues(alpha: opacity),
-            fp.color.withValues(alpha: opacity * 0.8),
-          ],
-        ).createShader(Rect.fromCircle(center: center, radius: radius));
+      const int particleCount = 8;
+      final int seed = fp.letter.codeUnitAt(0);
 
-      canvas.drawCircle(center, radius, paint);
+      for (int i = 0; i < particleCount; i++) {
+        final double angle = (2 * pi * i / particleCount) + (seed % 7) * 0.35;
+
+        final double travel = baseRadius * (1.6 + (i % 3) * 0.5) * t;
+
+        final Offset particleCenter = Offset(
+          origin.dx + cos(angle) * travel,
+          origin.dy + sin(angle) * travel,
+        );
+
+        final double particleRadius =
+            baseRadius * 0.22 * (1 - t).clamp(0.0, 1.0);
+        final double particleOpacity = (1 - t).clamp(0.0, 1.0);
+
+        if (particleRadius <= 0) continue;
+
+        final Paint particlePaint = Paint()
+          ..color = fp.color.withValues(alpha: particleOpacity);
+        canvas.drawCircle(particleCenter, particleRadius, particlePaint);
+      }
+
+      final double flashOpacity = (1 - t * 1.6).clamp(0.0, 1.0);
+      if (flashOpacity > 0) {
+        final Paint flashPaint = Paint()
+          ..color = Colors.white.withValues(alpha: flashOpacity * 0.8);
+        canvas.drawCircle(origin, baseRadius * (1 - t * 0.6), flashPaint);
+      }
     }
   }
 
@@ -1117,83 +1156,138 @@ class _GlossyBubblePainter extends CustomPainter {
 class _GameBoardPainter extends CustomPainter {
   final List<Bubble> bubbles;
   final Bubble? flyingBubble;
+  final double entranceProgress;
+  final double flyingPulse;
 
-  const _GameBoardPainter({required this.bubbles, required this.flyingBubble});
+  const _GameBoardPainter({
+    required this.bubbles,
+    required this.flyingBubble,
+    this.entranceProgress = 1.0,
+    this.flyingPulse = 0.0,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
+    final double t = Curves.easeOutBack.transform(
+      entranceProgress.clamp(0.0, 1.0),
+    );
+
+    const double travelDistance = 0.9;
+    final double offsetY = (1 - t) * travelDistance;
+
+    void drawBubble(
+      Canvas canvas,
+      Size size,
+      Bubble bubble, {
+      double? overrideY,
+      double pulse = 0.0,
+      bool boostSize = false,
+    }) {
+      final double y = overrideY ?? bubble.y;
+      final Offset center = Offset(bubble.x * size.width, y * size.height);
+
+      final double radius = bubble.radius * size.width;
+      if (radius <= 0) return;
+
+      final double haloRadius = radius * 1.35;
+      final double haloAlpha = boostSize ? 0.28 + pulse * 0.12 : 0.20;
+      canvas.drawCircle(
+        center,
+        haloRadius,
+        Paint()
+          ..shader = RadialGradient(
+            colors: [
+              bubble.color.withValues(alpha: haloAlpha),
+              bubble.color.withValues(alpha: 0.0),
+            ],
+            stops: const [0.72, 1.0],
+          ).createShader(Rect.fromCircle(center: center, radius: haloRadius)),
+      );
+
+      final Offset shadowCenter = center.translate(0, 3);
+      canvas.drawCircle(
+        shadowCenter,
+        radius,
+        Paint()
+          ..shader = RadialGradient(
+            colors: [
+              Colors.black.withValues(alpha: 0.16),
+              Colors.black.withValues(alpha: 0.0),
+            ],
+            stops: const [0.70, 1.0],
+          ).createShader(Rect.fromCircle(center: shadowCenter, radius: radius)),
+      );
+
+      final Paint paint = Paint()
+        ..shader = RadialGradient(
+          center: const Alignment(-0.35, -0.45),
+          radius: 0.9,
+          colors: [
+            Colors.white.withValues(alpha: 0.48),
+            bubble.color,
+            bubble.color.withValues(alpha: 0.78),
+          ],
+          stops: const [0.0, 0.30, 1.0],
+        ).createShader(Rect.fromCircle(center: center, radius: radius));
+      canvas.drawCircle(center, radius, paint);
+
+      canvas.drawOval(
+        Rect.fromCenter(
+          center: center.translate(-radius * 0.25, -radius * 0.38),
+          width: radius * 0.48,
+          height: radius * 0.28,
+        ),
+        Paint()..color = Colors.white.withValues(alpha: 0.58),
+      );
+
+      // Letter (layout() is required before measuring/painting).
+      final TextPainter textPainter = TextPainter(
+        text: TextSpan(
+          text: bubble.letter,
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: radius * 0.92,
+            fontWeight: FontWeight.w900,
+            shadows: [
+              Shadow(
+                color: Colors.black.withValues(alpha: 0.20),
+                blurRadius: 3,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+
+      textPainter.paint(
+        canvas,
+        Offset(
+          center.dx - textPainter.width / 2,
+          center.dy - textPainter.height / 2,
+        ),
+      );
+    }
+
     for (final bubble in bubbles) {
-      _drawBubble(canvas, size, bubble);
+      final double animatedY = bubble.y + offsetY;
+      drawBubble(canvas, size, bubble, overrideY: animatedY);
     }
     if (flyingBubble != null) {
-      _drawBubble(canvas, size, flyingBubble!);
+      drawBubble(
+        canvas,
+        size,
+        flyingBubble!,
+        pulse: flyingPulse,
+        boostSize: true,
+      );
     }
   }
 
-  void _drawBubble(Canvas canvas, Size size, Bubble bubble) {
-    final Offset center = Offset(bubble.x * size.width, bubble.y * size.height);
-    final double radius = bubble.radius * size.width;
-
-    if (radius <= 0) return;
-
-    final Paint shadow = Paint()
-      ..color = Colors.black.withValues(alpha: 0.13)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
-    canvas.drawCircle(center.translate(0, 3), radius * 0.92, shadow);
-
-    final Paint paint = Paint()
-      ..shader = RadialGradient(
-        center: const Alignment(-0.35, -0.45),
-        radius: 0.9,
-        colors: [
-          Colors.white.withValues(alpha: 0.48),
-          bubble.color,
-          bubble.color.withValues(alpha: 0.78),
-        ],
-        stops: const [0.0, 0.30, 1.0],
-      ).createShader(Rect.fromCircle(center: center, radius: radius));
-    canvas.drawCircle(center, radius, paint);
-
-    final Paint shine = Paint()..color = Colors.white.withValues(alpha: 0.58);
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: center.translate(-radius * 0.25, -radius * 0.38),
-        width: radius * 0.48,
-        height: radius * 0.28,
-      ),
-      shine,
-    );
-
-    final TextPainter textPainter = TextPainter(
-      text: TextSpan(
-        text: bubble.letter,
-        style: TextStyle(
-          color: Colors.white,
-          fontSize: radius * 0.92,
-          fontWeight: FontWeight.w900,
-          shadows: [
-            Shadow(
-              color: Colors.black.withValues(alpha: 0.20),
-              blurRadius: 3,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    );
-    textPainter.layout();
-    textPainter.paint(
-      canvas,
-      Offset(
-        center.dx - textPainter.width / 2,
-        center.dy - textPainter.height / 2,
-      ),
-    );
-  }
-
+  // The engine mutates the same list and the glow controller ticks
+  // every frame, so always repainting is the safe choice here.
   @override
-  bool shouldRepaint(covariant _GameBoardPainter oldDelegate) => true;
+  bool shouldRepaint(covariant _GameBoardPainter old) => true;
 }
 
 // ================================================================
@@ -1201,7 +1295,9 @@ class _GameBoardPainter extends CustomPainter {
 // ================================================================
 
 class _AimingLinePainter extends CustomPainter {
-  final List<Offset> points; // normalized 0-1 polyline, wall bounces included
+  /// Normalized 0-1 polyline from the engine: wall bounces included,
+  /// last point is the exact slot where the bubble will land.
+  final List<Offset> points;
   final Color color;
 
   const _AimingLinePainter({required this.points, required this.color});
@@ -1250,8 +1346,7 @@ class _AimingLinePainter extends CustomPainter {
       carryOver = travelled - segLength;
     }
 
-    // Small ring at the very end of the trajectory to show where the
-    // bubble will land.
+    // Ring at the landing slot.
     final Offset last = Offset(
       points.last.dx * size.width,
       points.last.dy * size.height,
@@ -1275,199 +1370,415 @@ class _AimingLinePainter extends CustomPainter {
 }
 
 // ================================================================
-// FLOWER LAUNCHER - redesigned to match the reference art: round
-// layered pink petals, a soft gold ring behind the ball, and a
-// simple green stem/leaf base (no brown basket-style pot).
+// ANIMATED LAUNCHER RING
 // ================================================================
 
-class _FlowerLauncherPainter extends CustomPainter {
+enum _RingSpin { shot, swap }
+
+class _LauncherRing extends StatefulWidget {
+  final String currentLetter;
+  final String nextLetter;
+  final Color currentColor;
+  final Color nextColor;
+  final int shotsRemaining;
+  final int shotTrigger;
+  final int swapTrigger;
+  final VoidCallback onSwapTap;
+
+  const _LauncherRing({
+    required this.currentLetter,
+    required this.nextLetter,
+    required this.currentColor,
+    required this.nextColor,
+    required this.shotsRemaining,
+    required this.shotTrigger,
+    required this.swapTrigger,
+    required this.onSwapTap,
+  });
+
+  @override
+  State<_LauncherRing> createState() => _LauncherRingState();
+}
+
+class _LauncherRingState extends State<_LauncherRing>
+    with TickerProviderStateMixin {
+  late final AnimationController _ringController;
+  late final AnimationController _transitionController;
+  late final Animation<double> _transition;
+
+  _RingSpin _spinKind = _RingSpin.shot;
+
+  static const double _topAngle = -pi / 2;
+  static const double _nextAngle = pi / 6;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _ringController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 5),
+    )..repeat();
+
+    _transitionController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 420),
+      value: 1.0,
+    );
+    _transition = CurvedAnimation(
+      parent: _transitionController,
+      curve: Curves.easeInOutCubic,
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant _LauncherRing oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (widget.shotTrigger != oldWidget.shotTrigger) {
+      _spinKind = _RingSpin.shot;
+      _transitionController.forward(from: 0);
+    } else if (widget.swapTrigger != oldWidget.swapTrigger) {
+      _spinKind = _RingSpin.swap;
+      _transitionController.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _ringController.dispose();
+    _transitionController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final Size size = Size(constraints.maxWidth, constraints.maxHeight);
+
+        final Offset center = Offset(size.width / 2, size.height * 0.42);
+        final double ringRadius = min(size.width, size.height) * 0.37;
+
+        Offset onRing(double angle) {
+          return Offset(
+            center.dx + cos(angle) * ringRadius,
+            center.dy + sin(angle) * ringRadius,
+          );
+        }
+
+        return AnimatedBuilder(
+          animation: Listenable.merge([_ringController, _transitionController]),
+          builder: (context, child) {
+            final double t = _transition.value;
+            final double rotation = _ringController.value * pi * 2;
+
+            final double currentAngle =
+                _nextAngle + (_topAngle - _nextAngle) * t;
+            final Offset currentPos = onRing(currentAngle);
+
+            Offset nextPos;
+
+            if (_spinKind == _RingSpin.swap) {
+              final double angle = _topAngle + (_nextAngle - _topAngle) * t;
+              nextPos = onRing(angle);
+            } else {
+              nextPos = onRing(_nextAngle);
+            }
+
+            final double nextOpacity = _spinKind == _RingSpin.shot
+                ? Curves.easeOut.transform(t)
+                : 1.0;
+
+            return Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Positioned.fill(
+                  child: CustomPaint(
+                    painter: _LauncherRingPainter(
+                      rotation: rotation,
+                      pulse: sin(rotation) * 0.5 + 0.5,
+                      color: widget.currentColor,
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: center.dx - 35,
+                  top: center.dy - 18,
+                  width: 70,
+                  height: 36,
+                  child: Center(
+                    child: Text(
+                      '${widget.shotsRemaining}',
+                      style: const TextStyle(
+                        fontSize: 25,
+                        fontWeight: FontWeight.w900,
+                        color: Color(0xFF7A4A3A),
+                        shadows: [Shadow(color: Colors.white, blurRadius: 5)],
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: currentPos.dx - 36,
+                  top: currentPos.dy - 36,
+                  child: IgnorePointer(
+                    child: _AnimatedShooterBubble(
+                      letter: widget.currentLetter,
+                      color: widget.currentColor,
+                      size: 72,
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: nextPos.dx - 21,
+                  top: nextPos.dy - 21,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: widget.onSwapTap,
+                    child: Opacity(
+                      opacity: nextOpacity.clamp(0.0, 1.0),
+                      child: _GlossyBubble(
+                        letter: widget.nextLetter,
+                        color: widget.nextColor,
+                        size: 42,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+// ================================================================
+// ANIMATED SHOOTER BUBBLE
+// ================================================================
+
+class _AnimatedShooterBubble extends StatefulWidget {
+  final String letter;
   final Color color;
-  const _FlowerLauncherPainter({required this.color});
+  final double size;
+
+  const _AnimatedShooterBubble({
+    required this.letter,
+    required this.color,
+    required this.size,
+  });
+
+  @override
+  State<_AnimatedShooterBubble> createState() => _AnimatedShooterBubbleState();
+}
+
+class _AnimatedShooterBubbleState extends State<_AnimatedShooterBubble>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        final double t = Curves.easeInOut.transform(_controller.value);
+        final double scale = 1.0 + (0.035 * t);
+
+        return Transform.scale(
+          scale: scale,
+          child: CustomPaint(
+            size: Size.square(widget.size),
+            painter: _ShooterBubblePainter(color: widget.color, glow: t),
+            child: SizedBox(
+              width: widget.size,
+              height: widget.size,
+              child: Center(
+                child: Text(
+                  widget.letter,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: widget.size * 0.42,
+                    fontWeight: FontWeight.w900,
+                    shadows: const [
+                      Shadow(
+                        color: Colors.black45,
+                        blurRadius: 3,
+                        offset: Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ShooterBubblePainter extends CustomPainter {
+  final Color color;
+  final double glow;
+
+  const _ShooterBubblePainter({required this.color, required this.glow});
 
   @override
   void paint(Canvas canvas, Size size) {
-    final Offset center = Offset(size.width / 2, size.height * 0.46);
-    final double flowerRadius = min(size.width, size.height) * 0.50;
+    final double radius = min(size.width, size.height) / 2;
+    final Offset center = Offset(size.width / 2, size.height / 2);
 
-    // ---- soft ground shadow under the whole plant ----
+    final Paint glowPaint = Paint()
+      ..color = color.withValues(alpha: 0.16 + glow * 0.10)
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, 10 + glow * 4);
+    canvas.drawCircle(center, radius * 0.94, glowPaint);
+
+    final Paint shadow = Paint()
+      ..color = Colors.black.withValues(alpha: 0.20)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
+    canvas.drawCircle(center.translate(0, 4), radius * 0.88, shadow);
+
+    final Paint bubblePaint = Paint()
+      ..shader = RadialGradient(
+        center: const Alignment(-0.35, -0.45),
+        radius: 0.95,
+        colors: [
+          Colors.white.withValues(alpha: 0.70),
+          color,
+          color.withValues(alpha: 0.72),
+        ],
+        stops: const [0.0, 0.30, 1.0],
+      ).createShader(Rect.fromCircle(center: center, radius: radius));
+    canvas.drawCircle(center, radius * 0.90, bubblePaint);
+
+    final Paint shine = Paint()..color = Colors.white.withValues(alpha: 0.72);
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: center.translate(-radius * 0.24, -radius * 0.38),
+        width: radius * 0.52,
+        height: radius * 0.28,
+      ),
+      shine,
+    );
+
+    final Paint smallShine = Paint()
+      ..color = Colors.white.withValues(alpha: 0.38);
+    canvas.drawCircle(
+      center.translate(radius * 0.34, -radius * 0.28),
+      radius * 0.09,
+      smallShine,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _ShooterBubblePainter oldDelegate) {
+    return oldDelegate.color != color || oldDelegate.glow != glow;
+  }
+}
+
+// ================================================================
+// RING PAINTER
+// ================================================================
+
+class _LauncherRingPainter extends CustomPainter {
+  final double rotation;
+  final double pulse;
+  final Color color;
+
+  const _LauncherRingPainter({
+    required this.rotation,
+    required this.pulse,
+    required this.color,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final Offset center = Offset(size.width / 2, size.height * 0.42);
+    final double ringRadius = min(size.width, size.height) * 0.37;
+
     final Paint shadowPaint = Paint()
-      ..color = Colors.black.withValues(alpha: 0.18)
+      ..color = Colors.black.withValues(alpha: 0.12)
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
     canvas.drawOval(
       Rect.fromCenter(
-        center: Offset(center.dx, size.height * 0.92),
-        width: flowerRadius * 1.6,
-        height: flowerRadius * 0.32,
+        center: Offset(center.dx, size.height * 0.91),
+        width: ringRadius * 1.65,
+        height: ringRadius * 0.25,
       ),
       shadowPaint,
     );
 
-    // ---- stem ----
-    final double stemTop = center.dy + flowerRadius * 0.30;
-    final double stemBottom = size.height * 0.90;
-    final Paint stemPaint = Paint()
-      ..shader =
-          const LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFF6FBF63), Color(0xFF3E8E4C)],
-          ).createShader(
-            Rect.fromLTWH(center.dx - 10, stemTop, 20, stemBottom - stemTop),
-          );
-    final Path stem = Path();
-    stem.moveTo(center.dx - 7, stemTop);
-    stem.quadraticBezierTo(
-      center.dx - 14,
-      (stemTop + stemBottom) / 2,
-      center.dx - 5,
-      stemBottom,
-    );
-    stem.lineTo(center.dx + 5, stemBottom);
-    stem.quadraticBezierTo(
-      center.dx + 12,
-      (stemTop + stemBottom) / 2,
-      center.dx + 7,
-      stemTop,
-    );
-    stem.close();
-    canvas.drawPath(stem, stemPaint);
+    final Paint outerGlow = Paint()
+      ..color = color.withValues(alpha: 0.12 + pulse * 0.08)
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, 18 + pulse * 5);
+    canvas.drawCircle(center, ringRadius * 0.98, outerGlow);
 
-    // ---- two leaves flanking the stem ----
-    void drawLeaf(bool left) {
-      final double dir = left ? -1 : 1;
-      final Offset base = Offset(
-        center.dx + dir * 4,
-        stemTop + (stemBottom - stemTop) * 0.42,
-      );
-
-      canvas.save();
-      canvas.translate(base.dx, base.dy);
-      canvas.rotate(dir * 0.55);
-
-      final double leafLen = flowerRadius * 0.62;
-      final double leafW = flowerRadius * 0.34;
-
-      final Path leaf = Path();
-      leaf.moveTo(0, 0);
-      leaf.quadraticBezierTo(
-        dir * leafLen * 0.55,
-        -leafW * 0.5,
-        dir * leafLen,
-        0,
-      );
-      leaf.quadraticBezierTo(dir * leafLen * 0.55, leafW * 0.5, 0, 0);
-      leaf.close();
-
-      final Paint leafPaint = Paint()
-        ..shader = LinearGradient(
-          colors: const [Color(0xFF8BD65C), Color(0xFF3C9B55)],
-        ).createShader(Rect.fromLTWH(0, -leafW / 2, dir * leafLen, leafW));
-      canvas.drawPath(leaf, leafPaint);
-
-      final Paint vein = Paint()
-        ..color = Colors.white.withValues(alpha: 0.35)
-        ..strokeWidth = 1.3
-        ..style = PaintingStyle.stroke;
-      canvas.drawLine(Offset.zero, Offset(dir * leafLen * 0.85, 0), vein);
-
-      canvas.restore();
-    }
-
-    drawLeaf(true);
-    drawLeaf(false);
-
-    // ---- outer petal layer (soft light pink, rounded) ----
-    final Paint outerPetalPaint = Paint()
-      ..shader = const RadialGradient(
-        center: Alignment(-0.30, -0.40),
-        radius: 1.0,
-        colors: [Color(0xFFFFEAF4), Color(0xFFFFB2D8), Color(0xFFFF7FC0)],
-        stops: [0.0, 0.55, 1.0],
-      ).createShader(Rect.fromCircle(center: center, radius: flowerRadius));
-
-    const int outerPetalCount = 10;
-    for (int i = 0; i < outerPetalCount; i++) {
-      final double angle = (pi * 2 / outerPetalCount) * i - pi / 2;
-      final Offset petalCenter = Offset(
-        center.dx + cos(angle) * flowerRadius * 0.58,
-        center.dy + sin(angle) * flowerRadius * 0.58,
-      );
-
-      canvas.save();
-      canvas.translate(petalCenter.dx, petalCenter.dy);
-      canvas.rotate(angle + pi / 2);
-
-      final double pw = flowerRadius * 0.50;
-      final double ph = flowerRadius * 0.62;
-      canvas.drawOval(
-        Rect.fromCenter(center: Offset.zero, width: pw, height: ph),
-        outerPetalPaint,
-      );
-
-      canvas.restore();
-    }
-
-    // ---- inner petal layer (deeper pink, slightly rotated offset) ----
-    final Paint innerPetalPaint = Paint()
-      ..shader =
-          const RadialGradient(
-            center: Alignment(-0.30, -0.40),
-            radius: 1.0,
-            colors: [Color(0xFFFFD3EA), Color(0xFFFF8AC8), Color(0xFFF25CA8)],
-            stops: [0.0, 0.55, 1.0],
-          ).createShader(
-            Rect.fromCircle(center: center, radius: flowerRadius * 0.75),
-          );
-
-    const int innerPetalCount = 8;
-    for (int i = 0; i < innerPetalCount; i++) {
-      final double angle =
-          (pi * 2 / innerPetalCount) * i - pi / 2 + (pi / innerPetalCount);
-      final Offset petalCenter = Offset(
-        center.dx + cos(angle) * flowerRadius * 0.34,
-        center.dy + sin(angle) * flowerRadius * 0.34,
-      );
-
-      canvas.save();
-      canvas.translate(petalCenter.dx, petalCenter.dy);
-      canvas.rotate(angle + pi / 2);
-
-      final double pw = flowerRadius * 0.34;
-      final double ph = flowerRadius * 0.42;
-      canvas.drawOval(
-        Rect.fromCenter(center: Offset.zero, width: pw, height: ph),
-        innerPetalPaint,
-      );
-
-      canvas.restore();
-    }
-
-    // ---- gold ring behind the ball ----
-    final Paint ringPaint = Paint()
-      ..shader =
-          const RadialGradient(
-            colors: [Color(0xFFFFF6C8), Color(0xFFFFD658), Color(0xFFF0A61E)],
-            stops: [0.0, 0.65, 1.0],
-          ).createShader(
-            Rect.fromCircle(center: center, radius: flowerRadius * 0.50),
-          );
-    canvas.drawCircle(center, flowerRadius * 0.50, ringPaint);
-
-    final Paint ringEdge = Paint()
-      ..color = Colors.white.withValues(alpha: 0.55)
+    final Paint innerGlow = Paint()
+      ..color = Colors.white.withValues(alpha: 0.12 + pulse * 0.06)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.2;
-    canvas.drawCircle(center, flowerRadius * 0.50, ringEdge);
+      ..strokeWidth = 10
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 7);
+    canvas.drawCircle(center, ringRadius, innerGlow);
 
-    final Paint glowPaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.20)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
-    canvas.drawCircle(center, flowerRadius * 0.46, glowPaint);
+    final Paint ringPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 7
+      ..shader = SweepGradient(
+        transform: GradientRotation(rotation),
+        colors: [
+          Colors.white.withValues(alpha: 0.25),
+          color.withValues(alpha: 0.95),
+          Colors.white.withValues(alpha: 0.95),
+          color.withValues(alpha: 0.35),
+          Colors.white.withValues(alpha: 0.25),
+        ],
+        stops: const [0.00, 0.20, 0.32, 0.62, 1.00],
+      ).createShader(Rect.fromCircle(center: center, radius: ringRadius));
+    canvas.drawCircle(center, ringRadius, ringPaint);
+
+    final Paint movingArc = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = 8
+      ..color = Colors.white.withValues(alpha: 0.72 + pulse * 0.20)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
+    final Rect arcRect = Rect.fromCircle(
+      center: center,
+      radius: ringRadius + 1,
+    );
+    canvas.drawArc(arcRect, rotation - 0.55, 0.75, false, movingArc);
+
+    final Paint highlight = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..color = Colors.white.withValues(alpha: 0.72);
+    canvas.drawCircle(center, ringRadius - 5, highlight);
   }
 
   @override
-  bool shouldRepaint(covariant _FlowerLauncherPainter oldDelegate) =>
-      oldDelegate.color != color;
+  bool shouldRepaint(covariant _LauncherRingPainter oldDelegate) {
+    return oldDelegate.rotation != rotation ||
+        oldDelegate.pulse != pulse ||
+        oldDelegate.color != color;
+  }
 }
 
 // ================================================================
@@ -1476,7 +1787,13 @@ class _FlowerLauncherPainter extends CustomPainter {
 
 class _FoundWord extends StatelessWidget {
   final String word;
-  const _FoundWord({required this.word});
+  final int done;
+  final int total;
+  const _FoundWord({
+    required this.word,
+    required this.done,
+    required this.total,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1493,14 +1810,28 @@ class _FoundWord extends StatelessWidget {
           ),
         ],
       ),
-      child: Text(
-        '✨ $word ✨',
-        style: const TextStyle(
-          fontSize: 22,
-          fontWeight: FontWeight.w900,
-          color: Color(0xFFFF4D96),
-          letterSpacing: 2,
-        ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '$word ✓',
+            style: const TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w900,
+              color: Color(0xFFFF4D96),
+              letterSpacing: 2,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            '$done / $total',
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF7A4A3A),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1590,8 +1921,7 @@ class _GameOverOverlay extends StatelessWidget {
 }
 
 // ================================================================
-// LEVEL COMPLETE OVERLAY - confetti + counting score + stars +
-// letters popping out of the basket one by one
+// LEVEL COMPLETE OVERLAY
 // ================================================================
 
 class _LevelCompleteOverlay extends StatelessWidget {
@@ -1665,19 +1995,13 @@ class _LevelCompleteOverlay extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 14),
-
-                // Stars, filled in one after another.
                 _StarRow(stars: stars),
                 const SizedBox(height: 14),
-
-                // Bubbles "popping out of the basket" one by one.
                 _CollectedLettersReveal(
                   letters: collectedLetters,
                   colors: letterColors,
                 ),
                 const SizedBox(height: 10),
-
-                // Score counting up.
                 TweenAnimationBuilder<int>(
                   tween: IntTween(begin: 0, end: score),
                   duration: const Duration(milliseconds: 900),
@@ -1693,7 +2017,6 @@ class _LevelCompleteOverlay extends StatelessWidget {
                     );
                   },
                 ),
-
                 const SizedBox(height: 22),
                 SizedBox(
                   width: double.infinity,

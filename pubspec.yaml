@@ -41,7 +41,7 @@ flutter:
   assets:
     - assets/images/
     - assets/audio/
-    
+    - assets/words.txt
     
 flutter_launcher_icons:
   android: "launcher_icon"

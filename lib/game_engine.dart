@@ -4,9 +4,8 @@ import 'package:flutter/material.dart';
 import 'bubble.dart';
 import 'levels.dart';
 
-/// A bubble that has just popped and is animating toward the basket
-/// at the bottom of the screen, purely for visual flair - it no
-/// longer exists in `bubbles` / affects game logic.
+/// A bubble that has just popped - purely visual, it no longer
+/// exists in `bubbles` / affects game logic.
 class FlyingPopBubble {
   final String letter;
   final Color color;
@@ -25,12 +24,34 @@ class FlyingPopBubble {
 
 class GameEngine {
   // ============================================================
+  // DICTIONARY (any real word pops, not only the level's words)
+  // ============================================================
+  static const int minWordLength = 3;
+  static const int maxWordLength = 8;
+
+  Set<String> _dictionary = {};
+  Set<String> _prefixes = {};
+
+  void setDictionary(Set<String> words) {
+    _dictionary = words;
+    _prefixes = {};
+    for (final String w in words) {
+      for (int i = 1; i <= w.length; i++) {
+        _prefixes.add(w.substring(0, i));
+      }
+    }
+  }
+
+  // ============================================================
   // BOARD
   // ============================================================
 
   final List<Bubble> bubbles = [];
 
   Bubble? flyingBubble;
+
+  // The board bubble the shot actually collided with.
+  Bubble? _lastHitBubble;
 
   double velocityX = 0;
   double velocityY = 0;
@@ -47,34 +68,43 @@ class GameEngine {
   String? foundWord;
   double wordMessageTimer = 0;
 
-  // Where popped bubbles fly to (normalized 0-1, same space as
-  // bubble.x / bubble.y) - keep this in sync with wherever the UI
-  // draws the basket icon.
-  final double basketX = 0.13;
-  final double basketY = 0.90;
-
   final List<FlyingPopBubble> flyingPops = [];
   final List<String> collectedLetters = [];
 
-  final double bubbleRadius = 0.052;
-  final double horizontalSpacing = 0.104;
+  /// Pixel diameter of the shooter ball. Board bubbles use the same
+  /// size (clamped so a full row still fits on screen).
+  static const double shooterBubbleDiameterPx = 72;
+  static const int maxBoardColumns = 6;
 
-  /// Everything - resting bubbles, the flying shot's collision
-  /// ceiling, and the aim clamp in the UI - stays below this y so
-  /// nothing is ever drawn on top of the hint box near the top of
-  /// the screen.
+  double bubbleRadius = 0.052;
+  double horizontalSpacing = 0.104;
+
+  /// Used by the UI aim clamp and as the reference for the first row.
   final double boardTopY = 0.16;
+
+  /// Center y of the first row (must match _addRow).
+  double get _topRowY => boardTopY + 0.03;
+
+  /// Highest y where a shot bubble's center can go (aim line and
+  /// bubble both stop here). Raise this number if it hits the top bar.
+  double get _ceilingY => 0.12;
+
+  final double dangerLineY = 0.86;
 
   double _aspect = 0.5;
 
-  /// Exposed so the UI layer (aim-line preview) can do the same
-  /// aspect-corrected geometry the engine itself uses.
+  /// Exposed so the UI layer can use the same aspect.
   double get aspect => _aspect;
 
   void configureForScreen(Size size) {
-    if (size.width > 0 && size.height > 0) {
-      _aspect = size.width / size.height;
-    }
+    if (size.width <= 0 || size.height <= 0) return;
+
+    _aspect = size.width / size.height;
+
+    final double maxFitDiameter = size.width * 0.90 / maxBoardColumns;
+    final double diameterPx = min(shooterBubbleDiameterPx, maxFitDiameter);
+    bubbleRadius = (diameterPx / 2) / size.width;
+    horizontalSpacing = bubbleRadius * 2;
   }
 
   double _physicalDistance(double dx, double dyHeightFraction) {
@@ -84,30 +114,12 @@ class GameEngine {
 
   double get verticalSpacing => horizontalSpacing * _aspect * 0.87;
 
-  // ------------------------------------------------------------
-  // Shot queue: replaces the old fixed/sequential letter order.
-  // Letters are shuffled, every letter needed by the level shows
-  // up 2-3 times (so a missed letter comes back around), and no
-  // two consecutive shots either repeat a letter or spell out two
-  // adjacent letters of a target word.
-  // ------------------------------------------------------------
   List<String> _shotQueue = [];
   int _shotQueueIndex = 0;
 
   final List<String> completedWords = [];
 
-  static const List<String> _fillerLetters = ['X', 'Z', 'Q', 'W', 'V', 'J'];
-
-  /// Guided assist (auto-connecting a shot to the nearest in-progress
-  /// word chain) is only given during the very first tutorial levels
-  /// - just enough to teach the mechanic - not the whole learning
-  /// window. From here on the player has to aim for real; hints and
-  /// generous shot counts (see levels.dart) are what keep the early
-  /// game easy, not the game secretly playing itself.
-  static const int guidedAssistLevelCap = 2;
-
-  /// Levels at or below this get a bigger board (more bubbles) since
-  /// their words are short and otherwise the board would look sparse.
+  /// Levels at or below this get a bigger board (more bubbles).
   static const int expandedBoardLevelCap = 20;
 
   // ============================================================
@@ -157,6 +169,7 @@ class GameEngine {
 
     bubbles.clear();
     flyingBubble = null;
+    _lastHitBubble = null;
     flyingPops.clear();
     collectedLetters.clear();
 
@@ -181,12 +194,10 @@ class GameEngine {
     } else {
       _createGenericLevel(currentLevel!);
     }
-
-    _breakPreformedWords();
   }
 
   // ============================================================
-  // LEVEL 1 BOARD - distractors only, C/A/T/D/O/G must be shot
+  // BOARDS
   // ============================================================
 
   void _createLevelOne() {
@@ -207,10 +218,6 @@ class GameEngine {
 
     if (source.isEmpty) return;
 
-    // Early levels (short, 1-2 word levels) get a bigger, fuller
-    // board - 24 bubbles across 4 rows of 6 - instead of the
-    // default 16, since a sparse board looks odd with such short
-    // words. Later levels keep the original 3-row layout.
     final bool expandedBoard = level.number <= expandedBoardLevelCap;
     final List<int> rowCounts = expandedBoard
         ? const [6, 6, 6, 6]
@@ -234,17 +241,18 @@ class GameEngine {
   void _addRow(List<String> letters, int row) {
     if (letters.isEmpty) return;
 
-    final double rowWidth = (letters.length - 1) * horizontalSpacing;
-    double startX = 0.5 - rowWidth / 2;
+    const int gridCols = 6;
+    final double h = horizontalSpacing;
 
-    // Rows start just below the hint box (boardTopY) and stack
-    // downward, so bubbles never sit above/behind the hint text.
-    final double y = boardTopY + 0.03 + row * verticalSpacing;
-    final bool offsetRow = row.isOdd;
+    // One shared hex grid for every row.
+    final double gridLeft = 0.5 - ((gridCols - 1) * h + h / 2) / 2;
+    final int colOffset = ((gridCols - letters.length) / 2).floor();
+
+    final double y = _topRowY + row * verticalSpacing;
+    final double rowShift = row.isOdd ? h / 2 : 0;
 
     for (int i = 0; i < letters.length; i++) {
-      double x = startX + i * horizontalSpacing;
-      if (offsetRow) x += horizontalSpacing / 2;
+      final double x = gridLeft + (colOffset + i) * h + rowShift;
 
       bubbles.add(
         Bubble(
@@ -258,144 +266,22 @@ class GameEngine {
     }
   }
 
-  void _breakPreformedWords() {
-    if (currentLevel == null) return;
-
-    int fillerIndex = 0;
-    int safety = 0;
-    bool changed = true;
-
-    while (changed && safety < 50) {
-      changed = false;
-      safety++;
-
-      for (final String word in currentLevel!.words) {
-        for (final Bubble bubble in List<Bubble>.from(bubbles)) {
-          if (bubble.letter != word[0]) continue;
-
-          final List<Bubble> matched = _findWordFromBubble(bubble, word);
-
-          if (matched.length == word.length) {
-            final Bubble toChange = matched.last;
-            final String filler =
-                _fillerLetters[fillerIndex % _fillerLetters.length];
-            fillerIndex++;
-
-            toChange.letter = filler;
-            toChange.color = _colorForLetter(filler);
-
-            changed = true;
-          }
-        }
-      }
-    }
-  }
-
   Color _colorForLetter(String letter) {
     return letterColors[letter.toUpperCase()] ?? const Color(0xFF7E8CFF);
   }
 
   // ============================================================
-  // SHOT QUEUE - random letters, no obvious "auto-spell" order,
-  // each needed letter repeated 2-3 times so a missed one comes
-  // back around.
+  // SHOT QUEUE - vowel-friendly random letters
   // ============================================================
 
-  /// Builds a shuffled queue biased heavily toward the letters the
-  /// player actually needs to complete the words - distractor
-  /// letters (present in `level.letters` but not in any word) are
-  /// kept a clear minority so they can never drown out the letters
-  /// the hint is asking for. Each needed letter's copy count scales
-  /// with how many times it's required across all words (e.g. the
-  /// two O's in "MOON"), plus extra redundancy so a miss is never
-  /// fatal. Decluster-passed so it doesn't hand the player a word
-  /// for free.
   List<String> _generateShotQueue(int minLength) {
-    final GameLevel level = currentLevel!;
+    const String pool =
+        'EEEEEEEEEEEEAAAAAAAAAIIIIIIIIIOOOOOOOONNNNNNRRRRRRTTTTTTLLLLSSSSUUUUDDDDGGGBBCCMMPPFFHHVVWWYYKJXQZ';
     final Random rnd = Random();
-
-    // How many times each letter is actually required to spell out
-    // every word in this level (summed, since words are solved one
-    // after another and each needs its own bubbles).
-    final Map<String, int> demand = {};
-    for (final String word in level.words) {
-      for (final String ch in word.split('')) {
-        final String letter = ch.toUpperCase();
-        demand[letter] = (demand[letter] ?? 0) + 1;
-      }
-    }
-
-    final Set<String> wordLetters = demand.keys.toSet();
-    final Set<String> distractors =
-        level.letters.map((l) => l.toUpperCase()).toSet()
-          ..removeAll(wordLetters);
-
-    final List<String> pool = [];
-
-    // Needed letters get generous, demand-scaled redundancy - they
-    // dominate the pool so the player sees them constantly instead
-    // of waiting for a lucky draw.
-    demand.forEach((letter, count) {
-      final int copies = (count * 6) + 5;
-      for (int i = 0; i < copies; i++) {
-        pool.add(letter);
-      }
-    });
-
-    if (pool.isEmpty) return List<String>.filled(minLength, 'A');
-
-    // Distractors are kept to a light sprinkle only - just enough
-    // for a bit of variety, never enough to meaningfully compete
-    // with the letters the player actually needs.
-    final int distractorBudget = max(pool.length ~/ 6, 0);
-    if (distractors.isNotEmpty) {
-      final List<String> distractorList = distractors.toList();
-      for (int i = 0; i < distractorBudget; i++) {
-        pool.add(distractorList[i % distractorList.length]);
-      }
-    }
-
-    final List<String> queue = [];
-    while (queue.length < minLength) {
-      final List<String> batch = List<String>.from(pool)..shuffle(rnd);
-      queue.addAll(batch);
-    }
-
-    return _declusterQueue(queue, level.words);
-  }
-
-  /// Pushes apart any adjacent pair that would either repeat a
-  /// letter or continue a word in sequence (e.g. C immediately
-  /// followed by A when "CAT" is a target word) - so the player
-  /// can never just fire a word in one uninterrupted burst.
-  List<String> _declusterQueue(List<String> queue, List<String> words) {
-    final Random rnd = Random();
-
-    bool isBadPair(String a, String b) {
-      if (a == b) return true;
-      for (final String word in words) {
-        for (int i = 0; i < word.length - 1; i++) {
-          if (word[i] == a && word[i + 1] == b) return true;
-        }
-      }
-      return false;
-    }
-
-    for (int i = 0; i < queue.length - 1; i++) {
-      int attempts = 0;
-      while (isBadPair(queue[i], queue[i + 1]) && attempts < 20) {
-        final int span = queue.length - i - 2;
-        if (span <= 0) break;
-        final int swapIdx = i + 2 + rnd.nextInt(span);
-
-        final String temp = queue[i + 1];
-        queue[i + 1] = queue[swapIdx];
-        queue[swapIdx] = temp;
-        attempts++;
-      }
-    }
-
-    return queue;
+    return List.generate(
+      max(minLength, 30),
+      (_) => pool[rnd.nextInt(pool.length)],
+    );
   }
 
   void _ensureShotQueueHas(int index) {
@@ -430,9 +316,7 @@ class GameEngine {
     return _shotQueue[index];
   }
 
-  /// Swaps the ball about to be fired with the one right after it,
-  /// so the player can fix a bad draw instead of being stuck with
-  /// it. Blocked mid-shot / on level end, same as shoot().
+  /// Swaps the ball about to be fired with the one right after it.
   void swapNextTwo() {
     if (shooting || levelComplete || gameOver || currentLevel == null) return;
 
@@ -444,8 +328,107 @@ class GameEngine {
   }
 
   // ============================================================
-  // SHOOT
+  // SHOOT (simulate once, replay exactly)
   // ============================================================
+  List<Offset> _flightPath = const [];
+  int _flightSeg = 0;
+  double _flightDone = 0;
+  Offset? _flightLanding;
+  Bubble? _flightHit;
+
+  /// Path (normalized coords) the shot will take, ending at the
+  /// exact slot where the bubble will land.
+  ({List<Offset> path, Offset? landing, Bubble? hit}) previewShot({
+    required String letter,
+    required double startX,
+    required double startY,
+    required double targetX,
+    required double targetY,
+  }) {
+    final double a = _aspect;
+
+    double px = startX, py = startY / a;
+    double dx = targetX - startX;
+    double dy = (targetY - startY) / a;
+    final double len = sqrt(dx * dx + dy * dy);
+    if (len < 1e-6) {
+      dx = 0;
+      dy = -1;
+    } else {
+      dx /= len;
+      dy /= len;
+    }
+    if (dy > -0.05) {
+      dy = -0.05;
+      final double m = sqrt(1 - dy * dy);
+      dx = dx < 0 ? -m : m;
+    }
+
+    final double lo = bubbleRadius, hi = 1 - bubbleRadius;
+    final double ceilY = _ceilingY / a;
+    final double R = bubbleRadius * 2;
+
+    final List<Offset> pts = [Offset(px, py)];
+    Bubble? hit;
+
+    for (int bounce = 0; bounce < 10; bounce++) {
+      double tWall = double.infinity;
+      if (dx > 1e-9) tWall = (hi - px) / dx;
+      if (dx < -1e-9) tWall = (lo - px) / dx;
+      if (tWall < 0) tWall = 0;
+
+      double tCeil = (ceilY - py) / dy;
+      if (tCeil < 0) tCeil = 0;
+
+      double tBub = double.infinity;
+      Bubble? bubHit;
+      for (final Bubble b in bubbles) {
+        final double fx = b.x - px;
+        final double fy = b.y / a - py;
+        final double proj = fx * dx + fy * dy;
+        if (proj <= 0) continue;
+        final double perp2 = fx * fx + fy * fy - proj * proj;
+        if (perp2 > R * R) continue;
+        double th = proj - sqrt(R * R - perp2);
+        if (th < 0) th = 0;
+        if (th < tBub) {
+          tBub = th;
+          bubHit = b;
+        }
+      }
+
+      final double t = min(tWall, min(tCeil, tBub));
+      px += dx * t;
+      py += dy * t;
+      pts.add(Offset(px, py));
+
+      if (t == tBub) {
+        hit = bubHit;
+        break;
+      }
+      if (t == tCeil) break;
+      dx = -dx;
+    }
+
+    final List<Offset> path =
+        pts.map((p) => Offset(p.dx, p.dy * a)).toList();
+
+    final Offset end = path.last;
+    final Bubble temp = Bubble(
+      x: end.dx,
+      y: end.dy,
+      letter: letter,
+      color: _colorForLetter(letter),
+      radius: bubbleRadius,
+    );
+    final Bubble? saved = _lastHitBubble;
+    _lastHitBubble = hit;
+    final Offset? landing = _findSnapPosition(temp);
+    _lastHitBubble = saved;
+
+    if (landing != null) path.add(landing);
+    return (path: path, landing: landing, hit: hit);
+  }
 
   void shoot({
     required String letter,
@@ -456,8 +439,22 @@ class GameEngine {
   }) {
     if (shooting || levelComplete || gameOver || currentLevel == null) return;
 
-    shooting = true;
+    final plan = previewShot(
+      letter: letter,
+      startX: startX,
+      startY: startY,
+      targetX: targetX,
+      targetY: targetY,
+    );
+    _flightPath = plan.path;
+    _flightLanding = plan.landing;
+    _flightHit = plan.hit;
+    _flightSeg = 0;
+    _flightDone = 0;
 
+    debugPrint('PLANNED ${plan.landing}');
+
+    shooting = true;
     flyingBubble = Bubble(
       x: startX,
       y: startY,
@@ -465,26 +462,11 @@ class GameEngine {
       color: _colorForLetter(letter),
       radius: bubbleRadius,
     );
-
-    final double dx = targetX - startX;
-    final double dy = targetY - startY;
-    final double distance = sqrt(dx * dx + dy * dy);
-
-    if (distance == 0) {
-      velocityX = 0;
-      velocityY = -0.016;
-      return;
-    }
-
-    const double speed = 0.016;
-    velocityX = (dx / distance) * speed;
-    velocityY = (dy / distance) * speed;
   }
 
   // ============================================================
   // UPDATE
   // ============================================================
-
   void update() {
     _updatePopAnimation();
 
@@ -498,53 +480,45 @@ class GameEngine {
 
     if (!shooting || flyingBubble == null) return;
 
-    flyingBubble!.x += velocityX;
-    flyingBubble!.y += velocityY;
-
-    if (flyingBubble!.x - bubbleRadius <= 0) {
-      flyingBubble!.x = bubbleRadius;
-      velocityX = velocityX.abs();
+    // Shot speed (physical distance per frame). Higher = faster.
+    double remaining = 0.07;
+    while (remaining > 0 && _flightSeg < _flightPath.length - 1) {
+      final Offset a = _flightPath[_flightSeg];
+      final Offset b = _flightPath[_flightSeg + 1];
+      final double left =
+          _physicalDistance(b.dx - a.dx, b.dy - a.dy) - _flightDone;
+      if (remaining < left) {
+        _flightDone += remaining;
+        remaining = 0;
+      } else {
+        remaining -= left;
+        _flightSeg++;
+        _flightDone = 0;
+      }
     }
-    if (flyingBubble!.x + bubbleRadius >= 1) {
-      flyingBubble!.x = 1 - bubbleRadius;
-      velocityX = -velocityX.abs();
-    }
 
-    if (flyingBubble!.y - bubbleRadius <= boardTopY) {
-      flyingBubble!.y = boardTopY + bubbleRadius;
-      _attachFlyingBubble();
+    if (_flightSeg >= _flightPath.length - 1) {
+      final Offset end = _flightPath.last;
+      flyingBubble!.x = end.dx;
+      flyingBubble!.y = end.dy;
+      _lastHitBubble = _flightHit;
+      _attachFlyingBubble(snapOverride: _flightLanding);
       return;
     }
 
-    for (final Bubble bubble in List<Bubble>.from(bubbles)) {
-      final double dx = flyingBubble!.x - bubble.x;
-      final double dy = flyingBubble!.y - bubble.y;
-      final double distance = _physicalDistance(dx, dy);
-      final double collisionDistance = bubbleRadius + bubble.radius;
-
-      if (distance <= collisionDistance) {
-        _attachFlyingBubble();
-        return;
-      }
-    }
+    final Offset a = _flightPath[_flightSeg];
+    final Offset b = _flightPath[_flightSeg + 1];
+    final double segLen = _physicalDistance(b.dx - a.dx, b.dy - a.dy);
+    final double t = segLen == 0 ? 0 : _flightDone / segLen;
+    flyingBubble!.x = a.dx + (b.dx - a.dx) * t;
+    flyingBubble!.y = a.dy + (b.dy - a.dy) * t;
   }
 
-  void _attachFlyingBubble() {
+  void _attachFlyingBubble({Offset? snapOverride}) {
     final Bubble? shot = flyingBubble;
     if (shot == null) return;
 
-    // Guided assist (auto-connecting to the right slot on an
-    // in-progress word) only exists during the first tutorial
-    // levels, to teach the drag-and-release mechanic. Beyond that,
-    // a shot only ever snaps to wherever it actually lands, so the
-    // player has to aim for real - the game never builds the word
-    // for them.
-    final bool assistAllowed =
-        (currentLevel?.number ?? 1) <= guidedAssistLevelCap;
-
-    final Offset? snap = assistAllowed
-        ? (_findGuidedSnapPosition(shot) ?? _findSnapPosition(shot))
-        : _findSnapPosition(shot);
+    final Offset? snap = snapOverride ?? _findSnapPosition(shot);
 
     if (snap == null) {
       shooting = false;
@@ -554,6 +528,7 @@ class GameEngine {
 
     shot.x = snap.dx;
     shot.y = snap.dy;
+    debugPrint('ACTUAL $snap');
 
     bubbles.add(shot);
 
@@ -561,120 +536,32 @@ class GameEngine {
     shooting = false;
     shotsUsed++;
 
-    _checkForWords();
-  }
-
-  /// Finds the longest run of consecutive correct letters for
-  /// [word] that already exists on the board, trying every possible
-  /// starting bubble and neighbor path. Returns an empty list if no
-  /// letter of the word has been placed yet.
-  List<Bubble> _longestPartialChain(String word) {
-    List<Bubble> best = [];
-
-    for (final Bubble start in bubbles) {
-      if (start.letter != word[0]) continue;
-
-      final List<Bubble> path = [];
-      final Set<int> used = {};
-
-      void search(Bubble current, int letterIndex) {
-        path.add(current);
-        used.add(current.id);
-
-        if (path.length > best.length) {
-          best = List<Bubble>.from(path);
-        }
-
-        if (letterIndex < word.length - 1) {
-          for (final Bubble neighbor in _getNeighbors(current)) {
-            if (used.contains(neighbor.id)) continue;
-            if (neighbor.letter != word[letterIndex + 1]) continue;
-            search(neighbor, letterIndex + 1);
-          }
-        }
-
-        path.removeLast();
-        used.remove(current.id);
-      }
-
-      search(start, 0);
+    if (_anyBubbleTooLow()) {
+      gameOver = true;
+      return;
     }
 
-    return best;
+    _checkForWords(shot);
   }
 
-  /// If the bubble that was just shot is the next letter needed to
-  /// continue an already-started word chain, snap it into the empty
-  /// slot right next to that chain's last bubble - so a correct
-  /// shot always connects the word instead of landing somewhere
-  /// unrelated on the board. Only ever called for levels within
-  /// [guidedAssistLevelCap].
-  Offset? _findGuidedSnapPosition(Bubble flying) {
-    if (currentLevel == null || bubbles.isEmpty) return null;
-
-    for (final String word in currentLevel!.words) {
-      if (completedWords.contains(word)) continue;
-
-      final List<Bubble> chain = _longestPartialChain(word);
-      if (chain.isEmpty)
-        continue; // nothing started yet - no anchor to guide to
-
-      final int nextIndex = chain.length;
-      if (nextIndex >= word.length) continue;
-      if (word[nextIndex] != flying.letter) continue;
-
-      final Bubble anchor = chain.last;
-      final double vSpace = verticalSpacing;
-
-      final List<Offset> directions = [
-        Offset(horizontalSpacing, 0),
-        Offset(-horizontalSpacing, 0),
-        Offset(horizontalSpacing / 2, vSpace),
-        Offset(-horizontalSpacing / 2, vSpace),
-        Offset(horizontalSpacing / 2, -vSpace),
-        Offset(-horizontalSpacing / 2, -vSpace),
-      ];
-
-      Offset? bestSlot;
-      double bestDist = double.infinity;
-
-      for (final Offset direction in directions) {
-        final double x = anchor.x + direction.dx;
-        final double y = anchor.y + direction.dy;
-
-        if (x - bubbleRadius < 0 ||
-            x + bubbleRadius > 1 ||
-            y - bubbleRadius < boardTopY ||
-            y + bubbleRadius > 0.84) {
-          continue;
-        }
-        if (!_positionIsFree(x, y)) continue;
-
-        final double dx = flying.x - x;
-        final double dy = flying.y - y;
-        final double dist = _physicalDistance(dx, dy);
-        if (dist < bestDist) {
-          bestDist = dist;
-          bestSlot = Offset(x, y);
-        }
-      }
-
-      if (bestSlot != null) return bestSlot;
+  bool _anyBubbleTooLow() {
+    for (final Bubble bubble in bubbles) {
+      if (bubble.y + bubble.radius >= dangerLineY) return true;
     }
-
-    return null;
+    return false;
   }
+
+  // ============================================================
+  // SNAP TO GRID
+  // ============================================================
 
   Offset? _findSnapPosition(Bubble flying) {
     if (bubbles.isEmpty) {
       return Offset(
         flying.x.clamp(bubbleRadius, 1 - bubbleRadius),
-        boardTopY + bubbleRadius,
+        _topRowY,
       );
     }
-
-    Offset? bestPosition;
-    double bestDistance = double.infinity;
 
     final double vSpace = verticalSpacing;
 
@@ -687,39 +574,50 @@ class GameEngine {
       Offset(-horizontalSpacing / 2, -vSpace),
     ];
 
-    for (final Bubble bubble in bubbles) {
-      for (final Offset direction in directions) {
-        final double x = bubble.x + direction.dx;
-        final double y = bubble.y + direction.dy;
+    Offset? searchAround(Iterable<Bubble> candidates) {
+      Offset? bestPosition;
+      double bestDistance = double.infinity;
 
-        if (x - bubbleRadius < 0 ||
-            x + bubbleRadius > 1 ||
-            y - bubbleRadius < boardTopY ||
-            y + bubbleRadius > 0.84) {
-          continue;
-        }
+      for (final Bubble bubble in candidates) {
+        for (final Offset direction in directions) {
+          final double x = bubble.x + direction.dx;
+          final double y = bubble.y + direction.dy;
+          if (x - bubbleRadius < 0 ||
+              x + bubbleRadius > 1 ||
+              y < _ceilingY - 0.001 ||
+              y + bubbleRadius > dangerLineY + 0.02) {
+            continue;
+          }
 
-        if (!_positionIsFree(x, y)) continue;
+          if (!_positionIsFree(x, y)) continue;
 
-        final double dx = flying.x - x;
-        final double dy = flying.y - y;
-        final double distance = _physicalDistance(dx, dy);
+          final double distance =
+              _physicalDistance(flying.x - x, flying.y - y);
 
-        if (distance < bestDistance) {
-          bestDistance = distance;
-          bestPosition = Offset(x, y);
+          if (distance < bestDistance) {
+            bestDistance = distance;
+            bestPosition = Offset(x, y);
+          }
         }
       }
+
+      return bestPosition;
     }
 
-    return bestPosition;
+    // First: slots next to the bubble the shot actually hit.
+    if (_lastHitBubble != null) {
+      final Offset? nearHit = searchAround([_lastHitBubble!]);
+      if (nearHit != null) return nearHit;
+    }
+
+    // Fallback: nearest free slot anywhere on the board.
+    return searchAround(bubbles);
   }
 
   bool _positionIsFree(double x, double y) {
     for (final Bubble bubble in bubbles) {
-      final double dx = bubble.x - x;
-      final double dy = bubble.y - y;
-      final double distance = _physicalDistance(dx, dy);
+      final double distance =
+          _physicalDistance(bubble.x - x, bubble.y - y);
 
       if (distance < horizontalSpacing * 0.80) return false;
     }
@@ -727,71 +625,55 @@ class GameEngine {
   }
 
   // ============================================================
-  // WORD CHECK
-  // ------------------------------------------------------------
-  // Checks EVERY bubble on the board as a possible start of each
-  // unfinished word - not just the bubble that was just shot. This
-  // matters because the letter that completes a word (by finally
-  // connecting the chain) is very often NOT the first letter of
-  // that word, e.g. shooting C, then A, then T: the chain C-A-T
-  // only becomes complete once T lands, but T is word[2], not
-  // word[0]. Scanning every bubble is cheap (boards are tiny) and
-  // is what makes pops actually fire reliably.
+  // WORD CHECK - any dictionary word that includes the bubble you
+  // just shot, formed by a connected chain of touching bubbles.
   // ============================================================
 
-  void _checkForWords() {
-    if (currentLevel == null) return;
-
-    for (final String word in currentLevel!.words) {
-      if (completedWords.contains(word)) continue;
-
-      for (final Bubble candidate in List<Bubble>.from(bubbles)) {
-        if (candidate.letter != word[0]) continue;
-
-        final List<Bubble> matched = _findWordFromBubble(candidate, word);
-
-        if (matched.length == word.length) {
-          _popWord(word, matched);
-          return;
-        }
-      }
+  void _checkForWords(Bubble shot) {
+    if (currentLevel == null || _dictionary.isEmpty) {
+      _checkGameOver();
+      return;
     }
 
-    _checkGameOver();
-  }
-
-  List<Bubble> _findWordFromBubble(Bubble start, String word) {
-    final List<Bubble> result = [];
+    List<Bubble> best = [];
+    String bestWord = '';
     final List<Bubble> path = [];
     final Set<int> used = {};
 
-    bool search(Bubble current, int letterIndex) {
-      if (current.letter != word[letterIndex]) return false;
-
+    void dfs(Bubble current, String text) {
       path.add(current);
       used.add(current.id);
 
-      if (letterIndex == word.length - 1) {
-        result.addAll(path);
-        return true;
-      }
+      final String next = text + current.letter.toUpperCase();
 
-      final List<Bubble> neighbors = _getNeighbors(current);
-
-      for (final Bubble neighbor in neighbors) {
-        if (used.contains(neighbor.id)) continue;
-        if (neighbor.letter != word[letterIndex + 1]) continue;
-
-        if (search(neighbor, letterIndex + 1)) return true;
+      // Stop early if no dictionary word starts with this text.
+      if (_prefixes.contains(next)) {
+        if (next.length >= minWordLength &&
+            _dictionary.contains(next) &&
+            path.any((b) => b.id == shot.id) &&
+            next.length > bestWord.length) {
+          bestWord = next;
+          best = List<Bubble>.from(path);
+        }
+        if (next.length < maxWordLength) {
+          for (final Bubble n in _getNeighbors(current)) {
+            if (!used.contains(n.id)) dfs(n, next);
+          }
+        }
       }
 
       path.removeLast();
       used.remove(current.id);
-      return false;
     }
 
-    search(start, 0);
-    return result;
+    for (final Bubble b in List<Bubble>.from(bubbles)) {
+      dfs(b, '');
+    }
+
+    if (best.isNotEmpty) {
+      _popWord(bestWord, best);
+    }
+    _checkGameOver();
   }
 
   List<Bubble> _getNeighbors(Bubble source) {
@@ -800,9 +682,8 @@ class GameEngine {
     for (final Bubble bubble in bubbles) {
       if (bubble.id == source.id) continue;
 
-      final double dx = bubble.x - source.x;
-      final double dy = bubble.y - source.y;
-      final double distance = _physicalDistance(dx, dy);
+      final double distance =
+          _physicalDistance(bubble.x - source.x, bubble.y - source.y);
 
       if (distance <= horizontalSpacing * 1.30) {
         neighbors.add(bubble);
@@ -813,13 +694,10 @@ class GameEngine {
   }
 
   // ============================================================
-  // POP WORD - bubbles fly to the basket instead of just fading
-  // in place.
+  // POP WORD
   // ============================================================
 
   void _popWord(String word, List<Bubble> matched) {
-    if (completedWords.contains(word)) return;
-
     completedWords.add(word);
     foundWord = word;
     wordMessageTimer = 1.2;
@@ -840,7 +718,7 @@ class GameEngine {
 
     Future<void>.delayed(const Duration(milliseconds: 550), () {
       if (currentLevel != null &&
-          completedWords.length == currentLevel!.words.length) {
+          completedWords.length >= currentLevel!.words.length) {
         levelComplete = true;
       }
     });
@@ -857,15 +735,26 @@ class GameEngine {
     }
   }
 
-  // Kept for the board painter's API - bubbles no longer shrink in
-  // place (they fly to the basket instead), so these are no-ops.
   double getBubbleScale(Bubble bubble) => 1;
   double getBubbleOpacity(Bubble bubble) => 1;
 
   void _checkGameOver() {
     if (currentLevel == null) return;
-    if (completedWords.length == currentLevel!.words.length) return;
 
+    // Level already completed - no Game Over.
+    if (completedWords.length >= currentLevel!.words.length) return;
+
+    // Any bubble in the danger zone near the launcher ends the game.
+    const double dangerY = 0.78;
+
+    for (final Bubble bubble in bubbles) {
+      if (bubble.y + bubble.radius >= dangerY) {
+        gameOver = true;
+        return;
+      }
+    }
+
+    // Out of shots.
     if (shotsUsed >= currentLevel!.maxShots) {
       gameOver = true;
     }
@@ -873,10 +762,16 @@ class GameEngine {
 
   /// 1-3 stars based on how efficiently the level was cleared.
   int get starsEarned {
-    if (currentLevel == null || currentLevel!.maxShots == 0) return 3;
-    final double ratio = shotsUsed / currentLevel!.maxShots;
-    if (ratio <= 0.6) return 3;
-    if (ratio <= 0.85) return 2;
+    final GameLevel? level = currentLevel;
+    if (level == null || level.maxShots == 0) return 3;
+
+    final int required = level.totalRequiredLetters;
+    final int slack = max(1, level.maxShots - required);
+    final int shotsLeft = max(0, level.maxShots - shotsUsed);
+    final double ratio = shotsLeft / slack;
+
+    if (ratio >= 0.5) return 3;
+    if (ratio >= 0.2) return 2;
     return 1;
   }
 

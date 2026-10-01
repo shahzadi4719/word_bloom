@@ -3,20 +3,19 @@ import 'dart:math';
 // ============================================================
 // GAME LEVEL MODEL
 // ============================================================
-
 class GameLevel {
   final int number;
   final List<String> words;
 
-  /// Clue for each word.
-  /// For levels after 15, these can be empty because hints are hidden.
+  /// One clue per word. Empty string = no clue for that word.
   final List<String> hints;
-
-  /// Letters used by the board + cannon.
   final List<String> letters;
-
-  /// Maximum number of shots allowed in this level.
   final int maxShots;
+
+  final int world; // 1..8
+  final String difficulty; // label for UI
+  /// 0 = none. Metadata for future special bubbles (engine does not use it yet).
+  final int specialTier;
 
   const GameLevel({
     required this.number,
@@ -24,12 +23,18 @@ class GameLevel {
     required this.hints,
     required this.letters,
     required this.maxShots,
+    this.world = 1,
+    this.difficulty = 'Very Easy',
+    this.specialTier = 0,
   });
 
-  /// Hints are shown only during the first learning levels.
-  bool get showHints => number <= 15;
+  bool get showHints => hints.any((h) => h.isNotEmpty);
+  int get wordCount => words.length;
+  int get minWordLength => words.map((w) => w.length).reduce(min);
+  int get maxWordLength => words.map((w) => w.length).reduce(max);
+  int get totalRequiredLetters =>
+      words.fold<int>(0, (t, w) => t + w.length);
 }
-
 // ============================================================
 // WORD BANK
 // ============================================================
@@ -271,306 +276,293 @@ const Map<String, String> wordHints = {
   'SUNFLOWER': '🌻 A bright yellow flower',
 };
 
+
 // ============================================================
 // SETTINGS
 // ============================================================
 
-/// Number of levels that will automatically exist.
-const int totalAutoLevels = 1000;
+const int totalAutoLevels = 2000;
 
-/// Random generator.
-final Random _random = Random();
+/// Hand-made levels. Anything put here replaces the generated level.
+const Map<int, GameLevel> levelOverrides = {};
+
+const List<String> worldNames = [
+  'Learning',
+  'Growing',
+  'Challenge',
+  'Advanced',
+  'Expert',
+  'Master',
+  'Master+',
+  'Final Garden',
+];
+
+const List<String> _difficultyLabels = [
+  'Very Easy',
+  'Easy',
+  'Medium',
+  'Hard',
+  'Hard+',
+  'Expert',
+  'Master',
+  'Legend',
+];
 
 // ============================================================
-// GET WORDS BY LEVEL
+// ROADMAP TABLES (level number -> properties)
 // ============================================================
-//
-// Difficulty now ramps up gradually across many small steps
-// instead of a few big jumps, so the very first levels are truly
-// easy (a single 3-letter word) and it only slowly grows into
-// longer words, more words per level, and more distractors.
-//
 
-List<String> _getWordsForLevel(int levelNumber) {
-  int minLength;
-  int maxLength;
-  int wordCount;
+int worldFor(int n) {
+  if (n <= 100) return 1;
+  if (n <= 300) return 2;
+  if (n <= 500) return 3;
+  if (n <= 800) return 4;
+  if (n <= 1000) return 5;
+  if (n <= 1400) return 6;
+  if (n <= 1700) return 7;
+  return 8;
+}
 
-  // ----------------------------------------------------------
-  // LEVELS 1-5
-  // Ultra easy onboarding: just one 3-letter word.
-  // ----------------------------------------------------------
-  if (levelNumber <= 5) {
-    minLength = 3;
-    maxLength = 3;
-    wordCount = 1;
-  }
-  // ----------------------------------------------------------
-  // LEVELS 6-15
-  // Introduce a second word, still short.
-  // ----------------------------------------------------------
-  else if (levelNumber <= 15) {
-    minLength = 3;
-    maxLength = 3;
-    wordCount = 2;
-  }
-  // ----------------------------------------------------------
-  // LEVELS 16-30
-  // Mix in some 4-letter words.
-  // ----------------------------------------------------------
-  else if (levelNumber <= 30) {
-    minLength = 3;
-    maxLength = 4;
-    wordCount = 2;
-  }
-  // ----------------------------------------------------------
-  // LEVELS 31-60
-  // ----------------------------------------------------------
-  else if (levelNumber <= 60) {
-    minLength = 4;
-    maxLength = 4;
-    wordCount = 2;
-  }
-  // ----------------------------------------------------------
-  // LEVELS 61-100
-  // ----------------------------------------------------------
-  else if (levelNumber <= 100) {
-    minLength = 4;
-    maxLength = 5;
-    wordCount = 2;
-  }
-  // ----------------------------------------------------------
-  // LEVELS 101-200
-  // Third word appears.
-  // ----------------------------------------------------------
-  else if (levelNumber <= 200) {
-    minLength = 4;
-    maxLength = 5;
-    wordCount = 3;
-  }
-  // ----------------------------------------------------------
-  // LEVELS 201-350
-  // ----------------------------------------------------------
-  else if (levelNumber <= 350) {
-    minLength = 5;
-    maxLength = 6;
-    wordCount = 3;
-  }
-  // ----------------------------------------------------------
-  // LEVELS 351-500
-  // ----------------------------------------------------------
-  else if (levelNumber <= 500) {
-    minLength = 5;
-    maxLength = 6;
-    wordCount = 3;
-  }
-  // ----------------------------------------------------------
-  // LEVELS 501-750
-  // Very hard
-  // ----------------------------------------------------------
-  else if (levelNumber <= 750) {
-    minLength = 6;
-    maxLength = 7;
-    wordCount = 3;
-  }
-  // ----------------------------------------------------------
-  // LEVELS 751-1000+
-  // Expert
-  // ----------------------------------------------------------
-  else {
-    minLength = 6;
-    maxLength = 9;
-    wordCount = 4;
-  }
+String worldNameFor(int n) => worldNames[worldFor(n) - 1];
 
-  final available = wordBank
-      .where((word) => word.length >= minLength && word.length <= maxLength)
-      .toList();
+int wordCountForLevel(int n) {
+  if (n <= 5) return 1;
+  if (n <= 20) return 2;
+  if (n <= 70) return 3;
+  if (n <= 150) return 4;
+  if (n <= 300) return 5;
+  if (n <= 500) return 6;
+  if (n <= 800) return 7;
+  if (n <= 1200) return 8;
+  if (n <= 1600) return 9;
+  if (n <= 1950) return 10;
+  if (n <= 1975) return 11;
+  return 12;
+}
 
-  // Safety fallback.
-  if (available.isEmpty) {
-    return ['CAT', 'DOG'];
-  }
+List<int> _lengthRange(int n) {
+  if (n <= 10) return [3, 3];
+  if (n <= 70) return [3, 4];
+  if (n <= 500) return [4, 5];
+  if (n <= 1200) return [5, 6];
+  if (n <= 1600) return [5, 7];
+  if (n <= 1800) return [6, 7];
+  return [6, 8];
+}
 
-  available.shuffle(_random);
+/// Every 10th level (after 10) is a "breather": shorter words, more shots.
+bool _isBreather(int n) => n > 10 && n % 10 == 0;
 
-  return available.take(min(wordCount, available.length)).toList();
+int _hintCountForLevel(int n) {
+  if (n <= 10) return 3;
+  if (n <= 100) return 2;
+  if (n <= 300) return n.isEven ? 2 : 1;
+  if (n <= 500) return 1;
+  if (n <= 1000) return n % 3 == 0 ? 1 : 0;
+  return n % 25 == 0 ? 1 : 0;
+}
+
+int _specialTierFor(int n) {
+  if (n <= 100) return 0;
+  if (n <= 300) return n % 8 == 0 ? 1 : 0;
+  if (n <= 500) return n % 6 == 0 ? 2 : 0;
+  if (n <= 1000) return n % 4 == 0 ? 3 : 0;
+  return n % 3 == 0 ? 4 : 0;
+}
+
+int _distractorCount(int n) {
+  if (n <= 5) return 3;
+  if (n <= 15) return 5;
+  if (n <= 30) return 6;
+  if (n <= 60) return 7;
+  if (n <= 100) return 9;
+  if (n <= 200) return 10;
+  if (n <= 350) return 12;
+  if (n <= 500) return 14;
+  if (n <= 750) return 16;
+  return 18;
+}
+
+double _extraRatio(int n) {
+  if (n <= 100) return 0.9;
+  if (n <= 300) return 0.7;
+  if (n <= 500) return 0.6;
+  if (n <= 800) return 0.5;
+  if (n <= 1000) return 0.45;
+  if (n <= 1400) return 0.4;
+  if (n <= 1700) return 0.35;
+  return 0.3;
 }
 
 // ============================================================
-// CREATE LETTER POOL
+// WORD SELECTION
 // ============================================================
-//
-// Every letter needed to create the words is included.
-//
-// Then extra random letters are added as distractors. The
-// distractor count now grows in small steps that line up with the
-// word-difficulty bands above, so the board doesn't suddenly get
-// noisy - it gets noisy a little at a time.
-//
 
-List<String> _createLetters(List<String> words, int levelNumber) {
-  final letters = <String>[];
+final List<String> _uniqueBank = wordBank.toSet().toList();
 
-  // ----------------------------------------------------------
-  // Add letters required by the words.
-  // ----------------------------------------------------------
+bool _conflicts(String w, List<String> picked) {
+  for (final p in picked) {
+    if (p == w || p.contains(w) || w.contains(p)) return true;
+  }
+  return false;
+}
 
-  for (final word in words) {
-    for (final letter in word.split('')) {
-      letters.add(letter);
+List<String> _pickWords(int n, Random rnd) {
+  final int count = wordCountForLevel(n);
+  final List<int> range = _lengthRange(n);
+  int lo = range[0];
+  int hi = range[1];
+  if (_isBreather(n)) {
+    lo = max(3, lo - 1);
+    hi = max(lo, hi - 1);
+  }
+
+  final List<String> picked = [];
+
+  for (int widen = 0; widen <= 3 && picked.length < count; widen++) {
+    final pool = _uniqueBank
+        .where((w) => w.length >= max(3, lo - widen) && w.length <= hi + widen)
+        .toList()
+      ..shuffle(rnd);
+
+    for (final w in pool) {
+      if (picked.length >= count) break;
+      if (_conflicts(w, picked)) continue;
+      picked.add(w);
     }
   }
+  return picked;
+}
 
-  // ----------------------------------------------------------
-  // Add random distractors.
-  // Difficulty increases with level, in small steps.
-  // ----------------------------------------------------------
+// ============================================================
+// LETTERS / HINTS / SHOTS
+// ============================================================
 
-  int distractorCount;
-
-  if (levelNumber <= 5) {
-    distractorCount = 3;
-  } else if (levelNumber <= 15) {
-    distractorCount = 5;
-  } else if (levelNumber <= 30) {
-    distractorCount = 6;
-  } else if (levelNumber <= 60) {
-    distractorCount = 7;
-  } else if (levelNumber <= 100) {
-    distractorCount = 9;
-  } else if (levelNumber <= 200) {
-    distractorCount = 10;
-  } else if (levelNumber <= 350) {
-    distractorCount = 12;
-  } else if (levelNumber <= 500) {
-    distractorCount = 14;
-  } else if (levelNumber <= 750) {
-    distractorCount = 16;
-  } else {
-    distractorCount = 18;
+List<String> _createLetters(List<String> words, int n, Random rnd) {
+  final letters = <String>[];
+  for (final word in words) {
+    letters.addAll(word.split(''));
   }
-
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-
-  for (int i = 0; i < distractorCount; i++) {
-    letters.add(alphabet[_random.nextInt(alphabet.length)]);
+  for (int i = 0; i < _distractorCount(n); i++) {
+    letters.add(alphabet[rnd.nextInt(alphabet.length)]);
   }
-
   return letters;
 }
 
-// ============================================================
-// CREATE MAX SHOTS
-// ============================================================
-//
-// Early levels are generous with extra shots so new players can't
-// easily fail; forgiveness tapers off slowly as the level bands
-// get harder.
-//
+List<String> _createHints(List<String> words, int n) {
+  final int clues = _hintCountForLevel(n);
+  return List.generate(words.length, (i) {
+    if (i >= clues) return '';
+    final w = words[i];
+    return wordHints[w] ?? '';
+  });
+}
 
-int _calculateMaxShots(List<String> words, int levelNumber) {
-  final requiredLetters = words.fold<int>(
-    0,
-    (total, word) => total + word.length,
-  );
+int _calculateMaxShots(List<String> words, int n, Random rnd) {
+  final int required = words.fold<int>(0, (t, w) => t + w.length);
 
-  int extraShots;
-
-  if (levelNumber <= 5) {
-    extraShots = 12;
-  } else if (levelNumber <= 15) {
-    extraShots = 10;
-  } else if (levelNumber <= 30) {
-    extraShots = 9;
-  } else if (levelNumber <= 60) {
-    extraShots = 9;
-  } else if (levelNumber <= 100) {
-    extraShots = 8;
-  } else if (levelNumber <= 200) {
-    extraShots = 8;
-  } else if (levelNumber <= 350) {
-    extraShots = 7;
-  } else if (levelNumber <= 500) {
-    extraShots = 7;
-  } else if (levelNumber <= 750) {
-    extraShots = 6;
+  int extra;
+  if (n <= 5) {
+    extra = 12; // tutorial: very generous
   } else {
-    extraShots = 6;
+    double ratio = _extraRatio(n) + (rnd.nextDouble() * 0.06 - 0.03);
+    if (_isBreather(n)) ratio += 0.2;
+    final int minExtra = n <= 100 ? 9 : (n <= 500 ? 7 : 6);
+    extra = max(minExtra, (required * ratio).round());
+  }
+  return required + extra;
+}
+
+// ============================================================
+// VALIDATION
+// ============================================================
+
+bool _isValid(GameLevel level) {
+  final n = level.number;
+  if (level.words.length != wordCountForLevel(n)) return false;
+  if (level.words.toSet().length != level.words.length) return false;
+
+  for (int i = 0; i < level.words.length; i++) {
+    final a = level.words[i];
+    if (!RegExp(r'^[A-Z]+$').hasMatch(a)) return false;
+    for (int j = i + 1; j < level.words.length; j++) {
+      final b = level.words[j];
+      if (a.contains(b) || b.contains(a)) return false;
+    }
   }
 
-  return requiredLetters + extraShots;
+  final need = <String, int>{};
+  for (final w in level.words) {
+    for (final c in w.split('')) {
+      need[c] = (need[c] ?? 0) + 1;
+    }
+  }
+  final have = <String, int>{};
+  for (final c in level.letters) {
+    have[c] = (have[c] ?? 0) + 1;
+  }
+  for (final e in need.entries) {
+    if ((have[e.key] ?? 0) < e.value) return false;
+  }
+
+  return level.maxShots >= level.totalRequiredLetters + 4;
 }
 
 // ============================================================
-// CREATE HINTS
+// LEVEL CREATOR
 // ============================================================
 
-List<String> _createHints(List<String> words) {
-  return words.map((word) {
-    return wordHints[word] ?? '💡 Find the letters and make this word';
-  }).toList();
+GameLevel _createLevel(int n) {
+  final GameLevel? custom = levelOverrides[n];
+  if (custom != null) return custom;
+
+  final int world = worldFor(n);
+  GameLevel? last;
+
+  // Seeded, so level N is the same every time the app opens.
+  for (int attempt = 0; attempt < 20; attempt++) {
+    final rnd = Random(n * 7919 + attempt * 104729);
+
+    final words = _pickWords(n, rnd);
+    if (words.isEmpty) continue;
+
+    final level = GameLevel(
+      number: n,
+      words: words,
+      hints: _createHints(words, n),
+      letters: _createLetters(words, n, rnd),
+      maxShots: _calculateMaxShots(words, n, rnd),
+      world: world,
+      difficulty: _difficultyLabels[world - 1],
+      specialTier: _specialTierFor(n),
+    );
+
+    last = level;
+    if (_isValid(level)) return level;
+  }
+
+  return last ??
+      GameLevel(
+        number: n,
+        words: const ['CAT'],
+        hints: const ['🐱 An animal that says meow'],
+        letters: const ['C', 'A', 'T', 'X', 'Z', 'Q'],
+        maxShots: 15,
+      );
 }
 
 // ============================================================
-// AUTO LEVEL CREATOR
+// LEVEL LIST + GET LEVEL
 // ============================================================
-
-GameLevel _createLevel(int levelNumber) {
-  final words = _getWordsForLevel(levelNumber);
-
-  final letters = _createLetters(words, levelNumber);
-
-  final hints = _createHints(words);
-
-  final maxShots = _calculateMaxShots(words, levelNumber);
-
-  return GameLevel(
-    number: levelNumber,
-    words: words,
-    hints: hints,
-    letters: letters,
-    maxShots: maxShots,
-  );
-}
-
-// ============================================================
-// AUTOMATIC LEVEL LIST
-// ============================================================
-//
-// This creates:
-// Level 1
-// Level 2
-// Level 3
-// ...
-// Level 1000
-//
-// No need to manually write every level.
-//
 
 final List<GameLevel> levels = List.generate(
   totalAutoLevels,
   (index) => _createLevel(index + 1),
 );
 
-// ============================================================
-// GET LEVEL
-// ============================================================
-
 GameLevel getLevel(int levelNumber) {
-  // Keep level number safe.
-  if (levelNumber < 1) {
-    levelNumber = 1;
-  }
-
-  // Automatically create a level even beyond 1000.
-  //
-  // This means the game can continue beyond the initial
-  // 1000 generated levels.
-
-  if (levelNumber <= levels.length) {
-    return levels[levelNumber - 1];
-  }
-
+  if (levelNumber < 1) levelNumber = 1;
+  if (levelNumber <= levels.length) return levels[levelNumber - 1];
   return _createLevel(levelNumber);
 }
