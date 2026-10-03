@@ -149,157 +149,160 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
     _scrollController.dispose();
     super.dispose();
   }
-void _showLevelPreview(int levelNumber) {
-  if (levelNumber > _unlockedLevel) return;
 
-  final GameLevel lv = getLevel(levelNumber);
-  final int stars = _levelStars[levelNumber] ?? 0;
+  void _showLevelPreview(int levelNumber) {
+    if (levelNumber > _unlockedLevel) return;
 
-  final String lengthText = lv.minWordLength == lv.maxWordLength
-      ? '${lv.minWordLength} LETTER WORDS'
-      : '${lv.minWordLength}–${lv.maxWordLength} LETTER WORDS';
+    final GameLevel lv = getLevel(levelNumber);
+    final int stars = _levelStars[levelNumber] ?? 0;
 
-  showDialog(
-    context: context,
-    barrierColor: Colors.black.withValues(alpha: 0.55),
-    builder: (dialogContext) => Dialog(
-      backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40),
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Container(
-            padding: const EdgeInsets.fromLTRB(22, 26, 22, 22),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Color(0xFFFFDCEA), Color(0xFFFFC2DC)],
+    final String lengthText = lv.minWordLength == lv.maxWordLength
+        ? '${lv.minWordLength} LETTER WORDS'
+        : '${lv.minWordLength}–${lv.maxWordLength} LETTER WORDS';
+
+    showDialog(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.55),
+      builder: (dialogContext) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 40),
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Container(
+              padding: const EdgeInsets.fromLTRB(22, 26, 22, 22),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Color(0xFFFFDCEA), Color(0xFFFFC2DC)],
+                ),
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(color: Colors.white, width: 3),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.25),
+                    blurRadius: 20,
+                    offset: const Offset(0, 10),
+                  ),
+                ],
               ),
-              borderRadius: BorderRadius.circular(28),
-              border: Border.all(color: Colors.white, width: 3),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.25),
-                  blurRadius: 20,
-                  offset: const Offset(0, 10),
-                ),
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'LEVEL $levelNumber',
-                  style: const TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.w900,
-                    color: Color(0xFF7A4A3A),
-                    shadows: [Shadow(color: Colors.white, blurRadius: 4)],
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'World ${lv.world} · ${worldNames[lv.world - 1]} · ${lv.difficulty}',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF9C6E5C),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.5),
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  child: Column(
-                    children: [
-                      Text(
-                        lv.wordCount == 1 ? '1 WORD' : '${lv.wordCount} WORDS',
-                        style: const TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.w900,
-                          color: Color(0xFFFF4D96),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        lengthText,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w800,
-                          color: Color(0xFF7A4A3A),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '${lv.maxShots} SHOTS',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFF9C6E5C),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: List.generate(
-                    3,
-                    (i) => Icon(
-                      Icons.star_rounded,
-                      size: 34,
-                      color: i < stars
-                          ? const Color(0xFFFFD23F)
-                          : Colors.white.withValues(alpha: 0.7),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'LEVEL $levelNumber',
+                    style: const TextStyle(
+                      fontSize: 26,
+                      fontWeight: FontWeight.w900,
+                      color: Color(0xFF7A4A3A),
+                      shadows: [Shadow(color: Colors.white, blurRadius: 4)],
                     ),
                   ),
-                ),
-                const SizedBox(height: 18),
-                _PillButton(
-                  label: 'PLAY',
-                  icon: Icons.play_arrow_rounded,
-                  colors: const [Color(0xFFFF9BC4), Color(0xFFFF4D96)],
-                  onTap: () {
-                    Navigator.of(dialogContext).pop();
-                    _openLevel(levelNumber);
-                  },
-                ),
-              ],
+                  const SizedBox(height: 2),
+                  Text(
+                    'World ${lv.world} · ${worldNames[lv.world - 1]} · ${lv.difficulty}',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF9C6E5C),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    child: Column(
+                      children: [
+                        Text(
+                          lv.wordCount == 1
+                              ? '1 WORD'
+                              : '${lv.wordCount} WORDS',
+                          style: const TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.w900,
+                            color: Color(0xFFFF4D96),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          lengthText,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF7A4A3A),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${lv.maxShots} SHOTS',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF9C6E5C),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: List.generate(
+                      3,
+                      (i) => Icon(
+                        Icons.star_rounded,
+                        size: 34,
+                        color: i < stars
+                            ? const Color(0xFFFFD23F)
+                            : Colors.white.withValues(alpha: 0.7),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  _PillButton(
+                    label: 'PLAY',
+                    icon: Icons.play_arrow_rounded,
+                    colors: const [Color(0xFFFF9BC4), Color(0xFFFF4D96)],
+                    onTap: () {
+                      Navigator.of(dialogContext).pop();
+                      _openLevel(levelNumber);
+                    },
+                  ),
+                ],
+              ),
             ),
-          ),
-          Positioned(
-            top: -14,
-            right: -8,
-            child: GestureDetector(
-              onTap: () => Navigator.of(dialogContext).pop(),
-              child: Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: const Color(0xFFE0554C),
-                  border: Border.all(color: Colors.white, width: 3),
-                ),
-                child: const Icon(
-                  Icons.close_rounded,
-                  color: Colors.white,
-                  size: 22,
+            Positioned(
+              top: -14,
+              right: -8,
+              child: GestureDetector(
+                onTap: () => Navigator.of(dialogContext).pop(),
+                child: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: const Color(0xFFE0554C),
+                    border: Border.all(color: Colors.white, width: 3),
+                  ),
+                  child: const Icon(
+                    Icons.close_rounded,
+                    color: Colors.white,
+                    size: 22,
+                  ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
-    ),
-  );
-}
+    );
+  }
 
   // ==============================================================
   // OPEN LEVEL
@@ -496,7 +499,7 @@ void _showLevelPreview(int levelNumber) {
                         // whatever the best clear earned (1-3).
                         stars: _levelStars[level] ?? 0,
                         onTap: () => _showLevelPreview(level),
-                                          );
+                      );
                     },
                   ),
                 ),
@@ -696,10 +699,7 @@ class _LevelNode extends StatelessWidget {
             // Small light "socket" ellipse the ball rests on, like
             // the reference's pedestal under every node - sits right
             // where the road ends.
-            const Positioned(
-              bottom: 0,
-              child: _Pedestal(),
-            ),
+            const Positioned(bottom: 0, child: _Pedestal()),
 
             // The ball itself, fixed just above the pedestal.
             Positioned(
@@ -802,11 +802,7 @@ class _LevelNode extends StatelessWidget {
             // reference, now in the theme's pink instead of green.
             // Absolutely positioned above the ball so it never
             // affects where the ball/pedestal sit.
-            if (current)
-              const Positioned(
-                bottom: 88,
-                child: _BounceArrow(),
-              ),
+            if (current) const Positioned(bottom: 88, child: _BounceArrow()),
           ],
         ),
       ),

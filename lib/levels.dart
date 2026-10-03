@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'word_dictionary.dart';
 
 // ============================================================
 // GAME LEVEL MODEL
@@ -32,219 +33,17 @@ class GameLevel {
   int get wordCount => words.length;
   int get minWordLength => words.map((w) => w.length).reduce(min);
   int get maxWordLength => words.map((w) => w.length).reduce(max);
-  int get totalRequiredLetters =>
-      words.fold<int>(0, (t, w) => t + w.length);
+  int get totalRequiredLetters => words.fold<int>(0, (t, w) => t + w.length);
 }
 // ============================================================
 // WORD BANK
 // ============================================================
-//
-// Add more words here whenever you want.
-// The automatic generator will use these words to create levels.
-//
-// IMPORTANT:
-// Keep words in CAPITAL letters.
-//
 
-const List<String> wordBank = [
-  // ----------------------------------------------------------
-  // 3 LETTER WORDS
-  // ----------------------------------------------------------
+List<String> wordBank = [];
 
-  'CAT',
-  'DOG',
-  'SUN',
-  'SKY',
-  'CAR',
-  'BUS',
-  'CUP',
-  'HAT',
-  'MAP',
-  'PEN',
-  'BOX',
-  'FOX',
-  'BAT',
-  'RAT',
-  'PIG',
-  'HEN',
-  'COW',
-  'BEE',
-  'ANT',
-  'OWL',
-  'EGG',
-  'ICE',
-  'RED',
-  'BIG',
-  'RUN',
-  'FUN',
-  'JAM',
-  'BED',
-  'KEY',
-  'TOY',
-  'BOY',
-  'GIRL',
-  'AIR',
-  'SEA',
-  'SUN',
-  'DAY',
-  'NIGHT',
-
-  // ----------------------------------------------------------
-  // 4 LETTER WORDS
-  // ----------------------------------------------------------
-  'STAR',
-  'MOON',
-  'FISH',
-  'BIRD',
-  'TREE',
-  'BOOK',
-  'BALL',
-  'MILK',
-  'CAKE',
-  'HOME',
-  'HAND',
-  'FOOD',
-  'FROG',
-  'DUCK',
-  'BEAR',
-  'LION',
-  'WOLF',
-  'SHIP',
-  'RAIN',
-  'SNOW',
-  'WIND',
-  'FIRE',
-  'GOLD',
-  'BLUE',
-  'PINK',
-  'ROSE',
-  'LEAF',
-  'LOVE',
-  'GAME',
-  'PLAY',
-  'JUMP',
-  'WALK',
-  'TALK',
-  'SING',
-  'DANCE',
-
-  // ----------------------------------------------------------
-  // 5 LETTER WORDS
-  // ----------------------------------------------------------
-  'BLOOM',
-  'FLOWER',
-  'APPLE',
-  'GRAPE',
-  'MANGO',
-  'LEMON',
-  'PEACH',
-  'BERRY',
-  'TIGER',
-  'HORSE',
-  'SHEEP',
-  'MOUSE',
-  'HOUSE',
-  'WORLD',
-  'HEART',
-  'SMILE',
-  'DREAM',
-  'LIGHT',
-  'CLOUD',
-  'WATER',
-  'EARTH',
-  'SPACE',
-  'GREEN',
-  'BLACK',
-  'WHITE',
-  'HAPPY',
-  'SWEET',
-  'MAGIC',
-  'MUSIC',
-  'CANDY',
-  'PARTY',
-  'QUEEN',
-  'CROWN',
-
-  // ----------------------------------------------------------
-  // 6 LETTER WORDS
-  // ----------------------------------------------------------
-  'GARDEN',
-  'BUTTER',
-  'BUNNY',
-  'MONKEY',
-  'PUPPY',
-  'KITTEN',
-  'SUNSET',
-  'SUNRISE',
-  'RAINBOW',
-  'FOREST',
-  'PLANET',
-  'GALAXY',
-  'OCEANS',
-  'ISLAND',
-  'CASTLE',
-  'BRIDGE',
-  'FRIEND',
-  'FAMILY',
-  'SUMMER',
-  'WINTER',
-  'SPRING',
-  'AUTUMN',
-  'PURPLE',
-  'YELLOW',
-  'ORANGE',
-  'SILVER',
-  'GOLDEN',
-  'BEAUTY',
-  'HAPPY',
-  'SMILES',
-  'DREAMS',
-  'MAGICAL',
-
-  // ----------------------------------------------------------
-  // 7 LETTER WORDS
-  // ----------------------------------------------------------
-  'FLOWERS',
-  'RAINBOW',
-  'BUTTERFLY',
-  'SUNFLOWER',
-  'GARDENS',
-  'KINGDOM',
-  'FRIENDS',
-  'FAMILY',
-  'DOLPHIN',
-  'PENGUIN',
-  'UNICORN',
-  'DRAGON',
-  'PRINCESS',
-  'TREASURE',
-  'ADVENTURE',
-  'JOURNEY',
-  'AMAZING',
-  'BEAUTIFUL',
-  'SPARKLE',
-  'SUNSHINE',
-
-  // ----------------------------------------------------------
-  // 8+ LETTER WORDS
-  // ----------------------------------------------------------
-  'BUTTERFLY',
-  'SUNFLOWER',
-  'ADVENTURE',
-  'BEAUTIFUL',
-  'CHOCOLATE',
-  'RAINBOWS',
-  'BUTTERFLIES',
-  'HAPPINESS',
-  'CREATIVE',
-  'DREAMING',
-  'WONDERFUL',
-  'STARLIGHT',
-  'MOONLIGHT',
-  'FLOWERING',
-];
-
-// ============================================================
+Future<void> initializeWordBank() async {
+  wordBank = (await loadWordList()).toList();
+}
 // HINTS
 // ============================================================
 //
@@ -275,7 +74,6 @@ const Map<String, String> wordHints = {
   'BUTTERFLY': '🦋 A colorful insect with wings',
   'SUNFLOWER': '🌻 A bright yellow flower',
 };
-
 
 // ============================================================
 // SETTINGS
@@ -341,13 +139,13 @@ int wordCountForLevel(int n) {
 }
 
 List<int> _lengthRange(int n) {
-  if (n <= 10) return [3, 3];
-  if (n <= 70) return [3, 4];
-  if (n <= 500) return [4, 5];
+  if (n <= 100) return [3, 3];
+  if (n <= 400) return [3, 4];
+  if (n <= 800) return [4, 5];
   if (n <= 1200) return [5, 6];
-  if (n <= 1600) return [5, 7];
-  if (n <= 1800) return [6, 7];
-  return [6, 8];
+  if (n <= 1500) return [6, 7];
+  if (n <= 1800) return [7, 8];
+  return [8, 8];
 }
 
 /// Every 10th level (after 10) is a "breather": shorter words, more shots.
@@ -410,30 +208,26 @@ bool _conflicts(String w, List<String> picked) {
 List<String> _pickWords(int n, Random rnd) {
   final int count = wordCountForLevel(n);
   final List<int> range = _lengthRange(n);
-  int lo = range[0];
-  int hi = range[1];
-  if (_isBreather(n)) {
-    lo = max(3, lo - 1);
-    hi = max(lo, hi - 1);
-  }
+
+  final int lo = range[0];
+  final int hi = range[1];
 
   final List<String> picked = [];
 
-  for (int widen = 0; widen <= 3 && picked.length < count; widen++) {
-    final pool = _uniqueBank
-        .where((w) => w.length >= max(3, lo - widen) && w.length <= hi + widen)
-        .toList()
-      ..shuffle(rnd);
+  final pool =
+      _uniqueBank.where((w) => w.length >= lo && w.length <= hi).toList()
+        ..shuffle(rnd);
 
-    for (final w in pool) {
-      if (picked.length >= count) break;
-      if (_conflicts(w, picked)) continue;
-      picked.add(w);
-    }
+  for (final w in pool) {
+    if (picked.length >= count) break;
+
+    if (_conflicts(w, picked)) continue;
+
+    picked.add(w);
   }
+
   return picked;
 }
-
 // ============================================================
 // LETTERS / HINTS / SHOTS
 // ============================================================
@@ -555,11 +349,11 @@ GameLevel _createLevel(int n) {
 // ============================================================
 // LEVEL LIST + GET LEVEL
 // ============================================================
+late List<GameLevel> levels;
 
-final List<GameLevel> levels = List.generate(
-  totalAutoLevels,
-  (index) => _createLevel(index + 1),
-);
+void generateLevels() {
+  levels = List.generate(totalAutoLevels, (index) => _createLevel(index + 1));
+}
 
 GameLevel getLevel(int levelNumber) {
   if (levelNumber < 1) levelNumber = 1;

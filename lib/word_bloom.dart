@@ -53,7 +53,7 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
   int _shotTrigger = 0;
   int _swapTrigger = 0;
 
-    @override
+  @override
   void initState() {
     super.initState();
 
@@ -121,7 +121,7 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
     double y = localPosition.dy / size.height;
 
     x = x.clamp(0.04, 0.96);
-        y = y.clamp(0.05, 0.78);
+    y = y.clamp(0.05, 0.78);
 
     setState(() {
       _aimX = x;
@@ -875,8 +875,9 @@ class _PauseToggleRow extends StatelessWidget {
                 AnimatedAlign(
                   duration: const Duration(milliseconds: 180),
                   curve: Curves.easeOut,
-                  alignment:
-                      value ? Alignment.centerLeft : Alignment.centerRight,
+                  alignment: value
+                      ? Alignment.centerLeft
+                      : Alignment.centerRight,
                   child: Padding(
                     padding: EdgeInsets.only(
                       left: value ? 6 : 0,
@@ -895,8 +896,9 @@ class _PauseToggleRow extends StatelessWidget {
                 AnimatedAlign(
                   duration: const Duration(milliseconds: 180),
                   curve: Curves.easeOut,
-                  alignment:
-                      value ? Alignment.centerRight : Alignment.centerLeft,
+                  alignment: value
+                      ? Alignment.centerRight
+                      : Alignment.centerLeft,
                   child: Container(
                     width: 26,
                     height: 26,

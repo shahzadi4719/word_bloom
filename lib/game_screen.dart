@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
 
-import '../levels.dart';
-import '../bubble.dart'; // <-- change this import to wherever your Bubble class file actually is
+import 'levels.dart';
+import 'bubble.dart'; // <-- change this import to wherever your Bubble class file actually is
 
 class GameScreen extends StatefulWidget {
   final int level;
@@ -48,8 +48,6 @@ class _GameScreenState extends State<GameScreen>
 
     _entranceController = AnimationController(
       vsync: this,
-      // Total time for the whole spawn sequence. Individual bubbles
-      // are staggered inside this window (see _animatedYFor).
       duration: const Duration(milliseconds: 1400),
     )..forward();
   }
@@ -62,8 +60,6 @@ class _GameScreenState extends State<GameScreen>
 
   // ==============================================================
   // BOARD GENERATION
-  // Lays letters out in a hex-packed grid (offset every other row),
-  // same shape as classic bubble-shooter boards.
   // ==============================================================
   List<Bubble> _generateBoard(List<String> letters) {
     const int cols = 8;
@@ -97,19 +93,9 @@ class _GameScreenState extends State<GameScreen>
     return bubbles;
   }
 
-  // ==============================================================
-  // Computes a bubble's CURRENT y (0-1 normalized) at this point in
-  // the entrance animation. Each bubble starts just below the
-  // bottom of the screen and eases up into its final board position
-  // with a slight overshoot ("bounce") thanks to easeOutBack.
-  //
-  // Bubbles are staggered by index so they don't all fly up at once
-  // - earlier bubbles (top of board) start a beat before later ones,
-  // matching the reference gif's cascading feel.
-  // ==============================================================
   double _animatedYFor(int index, int total, Bubble bubble) {
     final double staggerStart =
-        total > 1 ? (index / total) * 0.5 : 0.0; // spread over first half
+        total > 1 ? (index / total) * 0.5 : 0.0;
     final double start = staggerStart.clamp(0.0, 0.5);
     final double end = (start + 0.5).clamp(0.0, 1.0);
 
@@ -151,9 +137,7 @@ class _GameScreenState extends State<GameScreen>
             },
             child: Stack(
               children: [
-                // ======================================
                 // BACKGROUND
-                // ======================================
                 Container(
                   decoration: const BoxDecoration(
                     gradient: LinearGradient(
@@ -169,9 +153,7 @@ class _GameScreenState extends State<GameScreen>
                   ),
                 ),
 
-                // ======================================
                 // BOARD BUBBLES (glossy + spawn animation)
-                // ======================================
                 AnimatedBuilder(
                   animation: _entranceController,
                   builder: (context, _) {
@@ -203,9 +185,7 @@ class _GameScreenState extends State<GameScreen>
                   },
                 ),
 
-                // ======================================
                 // AIMING LINE (on top of bubbles)
-                // ======================================
                 CustomPaint(
                   size: size,
                   painter: _AimingLinePainter(
@@ -224,8 +204,6 @@ class _GameScreenState extends State<GameScreen>
 
 // ================================================================
 // GLOSSY BUBBLE WIDGET
-// Radial gradient + white highlight + soft shadow, matching the
-// shiny reference art (light spot top-left, darker shade bottom).
 // ================================================================
 
 class _GlossyBubble extends StatelessWidget {
@@ -250,19 +228,19 @@ class _GlossyBubble extends StatelessWidget {
           center: const Alignment(-0.35, -0.45),
           radius: 0.95,
           colors: [
-            Colors.white.withOpacity(0.65),
+            Colors.white.withValues(alpha: 0.65),
             color,
-            color.withOpacity(0.85),
+            color.withValues(alpha: 0.85),
           ],
           stops: const [0.0, 0.4, 1.0],
         ),
         border: Border.all(
-          color: Colors.white.withOpacity(0.8),
+          color: Colors.white.withValues(alpha: 0.8),
           width: size * 0.03,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.3),
+            color: Colors.black.withValues(alpha: 0.3),
             blurRadius: size * 0.12,
             offset: Offset(0, size * 0.06),
           ),
@@ -270,7 +248,6 @@ class _GlossyBubble extends StatelessWidget {
       ),
       child: Stack(
         children: [
-          // small extra shine spot, top-left
           Positioned(
             top: size * 0.16,
             left: size * 0.20,
@@ -278,7 +255,7 @@ class _GlossyBubble extends StatelessWidget {
               width: size * 0.22,
               height: size * 0.14,
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.55),
+                color: Colors.white.withValues(alpha: 0.55),
                 borderRadius: BorderRadius.circular(size * 0.1),
               ),
             ),
@@ -303,7 +280,7 @@ class _GlossyBubble extends StatelessWidget {
 }
 
 // ================================================================
-// AIMING LINE PAINTER (unchanged from your version)
+// AIMING LINE PAINTER
 // ================================================================
 
 class _AimingLinePainter extends CustomPainter {
@@ -325,7 +302,7 @@ class _AimingLinePainter extends CustomPainter {
     if (dx == 0 && dy == 0) return;
 
     final angle = atan2(dy, dx);
-    final length = 500.0;
+    const length = 500.0;
 
     final endPoint = Offset(
       startPoint!.dx + cos(angle) * length,
@@ -333,7 +310,7 @@ class _AimingLinePainter extends CustomPainter {
     );
 
     final paint = Paint()
-      ..color = Colors.white.withOpacity(0.8)
+      ..color = Colors.white.withValues(alpha: 0.8)
       ..strokeWidth = 3
       ..style = PaintingStyle.stroke;
 

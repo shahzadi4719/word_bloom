@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
 
 import 'screens/home_screen.dart';
+import 'levels.dart';
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
 
-void main() {
+  await initializeWordBank();
+  generateLevels();
+
   runApp(const WordBloomApp());
 }
 
