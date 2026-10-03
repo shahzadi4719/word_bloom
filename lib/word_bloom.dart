@@ -130,7 +130,14 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
   }
 
   void _shoot() {
-    if (_engine.shooting || _engine.gameOver || _engine.levelComplete) return;
+    // CHANGED: no shooting while the board is sliding down.
+    if (_engine.shooting ||
+        _engine.gameOver ||
+        _engine.levelComplete ||
+        _engine.goalReached ||
+        _engine.isScrolling) {
+      return;
+    }
 
     final String letter = _engine.getNextLetter();
 
@@ -146,8 +153,9 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
   }
 
   void _handleSwap() {
-    _engine.swapNextTwo();
-    setState(() => _swapTrigger++);
+    if (_engine.swapNextTwo()) {
+      setState(() => _swapTrigger++);
+    }
   }
 
   Color _bubbleColor(String letter) {
@@ -269,7 +277,7 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                     ),
                   ),
 
-                  // GAME BOARD
+                  // GAME BOARD (board bubbles + bubbles that are falling off)
                   Positioned.fill(
                     child: AnimatedBuilder(
                       animation: Listenable.merge([
@@ -279,8 +287,17 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                       builder: (context, _) {
                         return CustomPaint(
                           painter: _GameBoardPainter(
-                            bubbles: _engine.bubbles,
+                            bubbles: [
+                              ..._engine.bubbles,
+                              ..._engine.fallingBubbles,
+                            ],
                             flyingBubble: _engine.flyingBubble,
+                            stoneIds: _engine.stoneIds,
+                            lockHits: _engine.lockHits,
+                            iceIds: _engine.iceIds,
+                            hiddenIds: _engine.hiddenIds,
+                            bombIds: _engine.bombIds,
+                            wildIds: _engine.wildIds,
                             entranceProgress: _entranceController.value,
                             flyingPulse: _flyingGlowController.value,
                           ),
@@ -343,6 +360,62 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                     ),
                   ),
 
+                  // STATUS CHIPS: words goal, timer, board-drop countdown
+                  Positioned(
+                    top: 62,
+                    left: 0,
+                    right: 0,
+                    child: IgnorePointer(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          _InfoChip(
+                            icon: Icons.flag_rounded,
+                            text:
+                                'Words ${_engine.completedWords.length}/${_engine.currentLevel?.words.length ?? 1}',
+                            color: const Color(0xFFFF4D96),
+                          ),
+                          if (_engine.timeLimit > 0) ...[
+                            const SizedBox(width: 8),
+                            _InfoChip(
+                              icon: Icons.timer_rounded,
+                              text: _formatTime(_engine.timeLeft),
+                              color: _engine.timeLeft <= 10
+                                  ? const Color(0xFFE0554C)
+                                  : const Color(0xFF292929),
+                            ),
+                          ],
+                          if (_engine.shotsUntilDescend > 0) ...[
+                            const SizedBox(width: 8),
+                            _InfoChip(
+                              icon: Icons.south_rounded,
+                              text: 'Drop ${_engine.shotsUntilDescend}',
+                              color: _engine.shotsUntilDescend <= 3
+                                  ? const Color(0xFFE0554C)
+                                  : const Color(0xFFF2A93B),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // SWAPS LEFT
+                  if (_engine.swapsLeft >= 0)
+                    Positioned(
+                      right: 14,
+                      bottom: 22,
+                      child: IgnorePointer(
+                        child: _InfoChip(
+                          icon: Icons.swap_horiz_rounded,
+                          text: '${_engine.swapsLeft}',
+                          color: _engine.swapsLeft == 0
+                              ? const Color(0xFFE0554C)
+                              : const Color(0xFF7A4A3A),
+                        ),
+                      ),
+                    ),
+
                   // FOUND WORD
                   if (_engine.foundWord != null)
                     Positioned(
@@ -361,7 +434,12 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                   // GAME OVER
                   if (_engine.gameOver)
                     Positioned.fill(
-                      child: _GameOverOverlay(onPressed: _restartAndRetry),
+                      child: _GameOverOverlay(
+                        onPressed: _restartAndRetry,
+                        message: _engine.timeUp
+                            ? "Time's up!"
+                            : 'You ran out of shots',
+                      ),
                     ),
 
                   // LEVEL COMPLETE
@@ -392,6 +470,13 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
         ),
       ),
     );
+  }
+
+  String _formatTime(double seconds) {
+    final int total = seconds.ceil();
+    final int m = total ~/ 60;
+    final int sec = total % 60;
+    return '$m:${sec.toString().padLeft(2, '0')}';
   }
 
   int get _remainingShots {
@@ -497,6 +582,40 @@ class _TutorialOverlayState extends State<_TutorialOverlay>
                 ),
               );
             },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InfoChip extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  final Color color;
+
+  const _InfoChip({
+    required this.icon,
+    required this.text,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return _GlassBox(
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 17, color: color),
+          const SizedBox(width: 5),
+          Text(
+            text,
+            style: TextStyle(
+              fontWeight: FontWeight.w900,
+              fontSize: 13,
+              color: color,
+            ),
           ),
         ],
       ),
@@ -1158,18 +1277,37 @@ class _GlossyBubblePainter extends CustomPainter {
 class _GameBoardPainter extends CustomPainter {
   final List<Bubble> bubbles;
   final Bubble? flyingBubble;
+  final Set<int> stoneIds;
+  final Map<int, int> lockHits;
+  final Set<int> iceIds;
+  final Set<int> hiddenIds;
+  final Set<int> bombIds;
+  final Set<int> wildIds;
   final double entranceProgress;
   final double flyingPulse;
 
   const _GameBoardPainter({
     required this.bubbles,
     required this.flyingBubble,
+    this.stoneIds = const {},
+    this.lockHits = const {},
+    this.iceIds = const {},
+    this.hiddenIds = const {},
+    this.bombIds = const {},
+    this.wildIds = const {},
     this.entranceProgress = 1.0,
     this.flyingPulse = 0.0,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
+    // CHANGED: rows still hidden above the screen must not draw over
+    // the top bar, so everything above this line is clipped away.
+    canvas.save();
+    canvas.clipRect(
+      Rect.fromLTWH(0, size.height * 0.115, size.width, size.height),
+    );
+
     final double t = Curves.easeOutBack.transform(
       entranceProgress.clamp(0.0, 1.0),
     );
@@ -1220,14 +1358,53 @@ class _GameBoardPainter extends CustomPainter {
           ).createShader(Rect.fromCircle(center: shadowCenter, radius: radius)),
       );
 
+      // STONE: grey rock with cracks, no letter.
+      if (stoneIds.contains(bubble.id)) {
+        canvas.drawCircle(
+          center,
+          radius,
+          Paint()
+            ..shader = const RadialGradient(
+              center: Alignment(-0.35, -0.45),
+              radius: 0.95,
+              colors: [Color(0xFFC3C8D1), Color(0xFF7D8491), Color(0xFF4F5560)],
+              stops: [0.0, 0.45, 1.0],
+            ).createShader(Rect.fromCircle(center: center, radius: radius)),
+        );
+
+        final Paint crack = Paint()
+          ..color = Colors.black.withValues(alpha: 0.38)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = radius * 0.07
+          ..strokeCap = StrokeCap.round;
+        final Offset mid = center.translate(radius * 0.12, -radius * 0.05);
+        canvas.drawLine(center.translate(-radius * 0.10, -radius * 0.55), mid, crack);
+        canvas.drawLine(mid, center.translate(-radius * 0.20, radius * 0.45), crack);
+        canvas.drawLine(mid, center.translate(radius * 0.50, radius * 0.20), crack);
+
+        canvas.drawOval(
+          Rect.fromCenter(
+            center: center.translate(-radius * 0.25, -radius * 0.38),
+            width: radius * 0.42,
+            height: radius * 0.24,
+          ),
+          Paint()..color = Colors.white.withValues(alpha: 0.35),
+        );
+        return;
+      }
+
+      final Color bodyColor = hiddenIds.contains(bubble.id)
+          ? const Color(0xFF6D6A94)
+          : bubble.color;
+
       final Paint paint = Paint()
         ..shader = RadialGradient(
           center: const Alignment(-0.35, -0.45),
           radius: 0.9,
           colors: [
             Colors.white.withValues(alpha: 0.48),
-            bubble.color,
-            bubble.color.withValues(alpha: 0.78),
+            bodyColor,
+            bodyColor.withValues(alpha: 0.78),
           ],
           stops: const [0.0, 0.30, 1.0],
         ).createShader(Rect.fromCircle(center: center, radius: radius));
@@ -1245,7 +1422,7 @@ class _GameBoardPainter extends CustomPainter {
       // Letter (layout() is required before measuring/painting).
       final TextPainter textPainter = TextPainter(
         text: TextSpan(
-          text: bubble.letter,
+          text: _displayLetter(bubble),
           style: TextStyle(
             color: Colors.white,
             fontSize: radius * 0.92,
@@ -1269,6 +1446,167 @@ class _GameBoardPainter extends CustomPainter {
           center.dy - textPainter.height / 2,
         ),
       );
+
+      // ICE: frosted cover with a snowflake.
+      if (iceIds.contains(bubble.id)) {
+        canvas.drawCircle(
+          center,
+          radius,
+          Paint()..color = const Color(0xFFBFE9FF).withValues(alpha: 0.62),
+        );
+        final Paint flake = Paint()
+          ..color = Colors.white.withValues(alpha: 0.9)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = radius * 0.09
+          ..strokeCap = StrokeCap.round;
+        for (int k = 0; k < 3; k++) {
+          final double a = k * pi / 3;
+          canvas.drawLine(
+            center.translate(cos(a) * radius * 0.72, sin(a) * radius * 0.72),
+            center.translate(-cos(a) * radius * 0.72, -sin(a) * radius * 0.72),
+            flake,
+          );
+        }
+        canvas.drawCircle(
+          center,
+          radius,
+          Paint()
+            ..color = Colors.white.withValues(alpha: 0.85)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = radius * 0.08,
+        );
+      }
+
+      // BOMB: dark ring and a lit fuse spark.
+      if (bombIds.contains(bubble.id)) {
+        canvas.drawCircle(
+          center,
+          radius * 0.96,
+          Paint()
+            ..color = const Color(0xFF2B2B3A)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = radius * 0.16,
+        );
+        final Offset spark = center.translate(radius * 0.72, -radius * 0.72);
+        canvas.drawCircle(
+          spark,
+          radius * 0.24,
+          Paint()..color = const Color(0xFFFF8A3D),
+        );
+        canvas.drawCircle(
+          spark,
+          radius * 0.11,
+          Paint()..color = const Color(0xFFFFE28A),
+        );
+      }
+
+      // LOCK: dimmed letter, steel ring, small "padlock + shots left" pill.
+      final int? hitsLeft = lockHits[bubble.id];
+      if (hitsLeft != null) {
+        canvas.drawCircle(
+          center,
+          radius,
+          Paint()..color = const Color(0xFF3A3F55).withValues(alpha: 0.42),
+        );
+
+        // brushed steel ring
+        canvas.drawCircle(
+          center,
+          radius * 0.93,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = radius * 0.13
+            ..shader = const SweepGradient(
+              colors: [
+                Color(0xFFF1F4FA),
+                Color(0xFF8A93A6),
+                Color(0xFFFFFFFF),
+                Color(0xFF7B8497),
+                Color(0xFFF1F4FA),
+              ],
+            ).createShader(Rect.fromCircle(center: center, radius: radius)),
+        );
+
+        // pill at the bottom of the bubble
+        final Offset pillCenter = center.translate(0, radius * 0.62);
+        final RRect pill = RRect.fromRectAndRadius(
+          Rect.fromCenter(
+            center: pillCenter,
+            width: radius * 1.0,
+            height: radius * 0.46,
+          ),
+          Radius.circular(radius * 0.23),
+        );
+        canvas.drawRRect(
+          pill.shift(Offset(0, radius * 0.04)),
+          Paint()..color = Colors.black.withValues(alpha: 0.30),
+        );
+        canvas.drawRRect(
+          pill,
+          Paint()
+            ..shader = const LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0xFF3B4378), Color(0xFF1B1F3B)],
+            ).createShader(pill.outerRect),
+        );
+        canvas.drawRRect(
+          pill,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = radius * 0.05
+            ..color = const Color(0xFFFFD23F),
+        );
+
+        // tiny padlock
+        final Offset lockC = pillCenter.translate(-radius * 0.22, radius * 0.02);
+        canvas.drawArc(
+          Rect.fromCenter(
+            center: lockC.translate(0, -radius * 0.07),
+            width: radius * 0.17,
+            height: radius * 0.20,
+          ),
+          pi,
+          pi,
+          false,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = radius * 0.04
+            ..strokeCap = StrokeCap.round
+            ..color = const Color(0xFFE6EAF2),
+        );
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromCenter(
+              center: lockC.translate(0, radius * 0.03),
+              width: radius * 0.25,
+              height: radius * 0.17,
+            ),
+            Radius.circular(radius * 0.04),
+          ),
+          Paint()..color = const Color(0xFFFFD23F),
+        );
+
+        // shots still needed to open it
+        final TextPainter hitPainter = TextPainter(
+          text: TextSpan(
+            text: '$hitsLeft',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: radius * 0.34,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        hitPainter.paint(
+          canvas,
+          Offset(
+            pillCenter.dx + radius * 0.17 - hitPainter.width / 2,
+            pillCenter.dy - hitPainter.height / 2,
+          ),
+        );
+      }
     }
 
     for (final bubble in bubbles) {
@@ -1284,6 +1622,15 @@ class _GameBoardPainter extends CustomPainter {
         boostSize: true,
       );
     }
+
+    // CHANGED: closes the clip opened at the top of paint().
+    canvas.restore();
+  }
+
+  String _displayLetter(Bubble b) {
+    if (hiddenIds.contains(b.id)) return '?';
+    if (wildIds.contains(b.id)) return '★';
+    return b.letter;
   }
 
   // The engine mutates the same list and the glow controller ticks
@@ -1845,7 +2192,11 @@ class _FoundWord extends StatelessWidget {
 
 class _GameOverOverlay extends StatelessWidget {
   final VoidCallback onPressed;
-  const _GameOverOverlay({required this.onPressed});
+  final String message;
+  const _GameOverOverlay({
+    required this.onPressed,
+    this.message = 'You ran out of shots',
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1883,7 +2234,7 @@ class _GameOverOverlay extends StatelessWidget {
               ),
               const SizedBox(height: 10),
               Text(
-                'You ran out of shots',
+                message,
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 14,

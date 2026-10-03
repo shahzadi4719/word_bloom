@@ -16,19 +16,10 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
   // PLAYER PROGRESS
   // ==============================================================
 
-  // Highest level the player is allowed to play. Persisted to disk
-  // via ProgressService (see _loadProgress) so closing and
-  // reopening the app resumes exactly where the player left off
-  // instead of resetting back to level 1.
   int _unlockedLevel = 1;
 
-  // Stars earned per completed level (levelNumber -> 1..3), also
-  // persisted. This is what actually gets drawn under each node on
-  // the path, instead of a hardcoded "3 stars for any done level".
   final Map<int, int> _levelStars = {};
 
-  // Becomes true once saved progress has been read from disk, so we
-  // don't flash "level 1" for a frame before the real value loads.
   bool _progressLoaded = false;
 
   final ScrollController _scrollController = ScrollController();
@@ -37,22 +28,10 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
   // WORLD 1 — auto-generated levels
   // ==============================================================
 
-  // Total number of levels to auto-generate. Change this one
-  // number to generate more or fewer levels — nothing else needs
-  // to be touched.
   static const int _totalLevels = 2000;
 
-  // Vertical space each level "slot" takes up. Because this is a
-  // fixed value, ListView.builder can compute the scroll extent
-  // for all 2000 levels WITHOUT building all 2000 widgets — only
-  // the ones actually visible on screen get built. This is what
-  // keeps the screen smooth even with thousands of levels.
   static const double _nodeSpacing = 150;
 
-  // Horizontal position of every node as a fraction of screen
-  // width (0.0 = far left, 1.0 = far right). This list repeats
-  // (cycles) forever to create the never-ending zig-zag/wavy path,
-  // so it works for any level count, including 2000+.
   static const List<double> _xPattern = [
     0.85,
     0.25,
@@ -77,15 +56,9 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
   }
 
   // ==============================================================
-  // PERSISTENCE - load/save unlocked level + per-level stars so
-  // progress survives the app being closed and reopened.
+  // PERSISTENCE
   // ==============================================================
 
-  /// Re-reads progress from disk via [ProgressService] - the single
-  /// source of truth. Safe to call repeatedly (e.g. every time the
-  /// player returns to this screen from a play session) since it
-  /// always reflects whatever was actually saved, regardless of
-  /// what happened inside the game screen.
   Future<void> _loadProgress({bool jumpToLevel = false}) async {
     final int savedUnlocked = await ProgressService.getUnlockedLevel();
     final Map<int, int> savedStars = await ProgressService.getLevelStars();
@@ -112,9 +85,6 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
     }
   }
 
-  // Scrolls so the player's current/unlocked level node is roughly
-  // centered in view. List index 0 = top = highest level number, so
-  // the unlocked level's list index counts down from the top.
   void _scrollToUnlockedLevel({required bool animate}) {
     if (!_scrollController.hasClients) return;
 
@@ -156,9 +126,8 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
     final GameLevel lv = getLevel(levelNumber);
     final int stars = _levelStars[levelNumber] ?? 0;
 
-    final String lengthText = lv.minWordLength == lv.maxWordLength
-        ? '${lv.minWordLength} LETTER WORDS'
-        : '${lv.minWordLength}–${lv.maxWordLength} LETTER WORDS';
+    // CHANGED: label now comes from levels.dart (single source of truth)
+    final String lengthText = lengthLabelFor(levelNumber);
 
     showDialog(
       context: context,
@@ -316,13 +285,6 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
         builder: (context) => WordBloom(
           startLevel: levelNumber,
           onLevelComplete: (completedLevel, starsEarned) {
-            // Optimistic in-memory update so the UI feels instant if
-            // the player is still on this screen's stack somehow.
-            // The real, guaranteed-correct sync happens below, right
-            // after the game screen is popped (see _loadProgress
-            // call after the push returns) - that one always wins
-            // because it re-reads whatever was actually written to
-            // disk by ProgressService the moment the level was won.
             if (!mounted) return;
             setState(() {
               final int existingStars = _levelStars[completedLevel] ?? 0;
@@ -341,10 +303,6 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
       ),
     );
 
-    // The player is back on this screen now - resync fully with
-    // disk so whatever was actually saved (even across several
-    // levels played back-to-back in one session) is reflected here,
-    // no matter what happened with the callback above.
     await _loadProgress();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -385,14 +343,10 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
       );
     }
     return Scaffold(
-      // Dull, muted peachy background matching the castle-path theme.
       backgroundColor: const Color(0xFFE3C6B4),
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // ==================================================
-          // DREAMY PINK LEVEL-MAP BACKGROUND
-          // ==================================================
           Positioned.fill(
             child: Image.asset(
               'assets/images/level_select_bg.png',
@@ -404,9 +358,6 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
             bottom: false,
             child: Column(
               children: [
-                // ==================================================
-                // HEADER
-                // ==================================================
                 Padding(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 14,
@@ -453,24 +404,6 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
                     ],
                   ),
                 ),
-
-                // ==================================================
-                // AUTO-GENERATED SCROLLABLE LEVEL LIST
-                //
-                // ListView.builder + a fixed itemExtent means Flutter
-                // only ever builds the handful of level tiles that
-                // are actually on screen, no matter whether
-                // _totalLevels is 10 or 20,000. The path segment for
-                // each tile is drawn locally inside that tile, and
-                // because neighboring tiles share the same x
-                // coordinate at their shared edge, the path still
-                // looks like one continuous winding line.
-                //
-                // List index 0 = the TOP of the list = the highest
-                // level number. Index (_totalLevels - 1) = level 1,
-                // which sits at the very bottom — matching the
-                // original bottom-up layout.
-                // ==================================================
                 Expanded(
                   child: ListView.builder(
                     controller: _scrollController,
@@ -494,9 +427,6 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
                         level: level,
                         unlocked: level <= _unlockedLevel,
                         current: level == _unlockedLevel,
-                        // Real, persisted stars for this level - 0
-                        // until it's actually been cleared, then
-                        // whatever the best clear earned (1-3).
                         stars: _levelStars[level] ?? 0,
                         onTap: () => _showLevelPreview(level),
                       );
@@ -514,15 +444,11 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
 
 // ================================================================
 // LEVEL TILE
-// One fixed-height slot: draws the incoming path segment (from the
-// tile above) plus this level's node. Fully self-contained so
-// ListView.builder can build/dispose it independently as the user
-// scrolls through thousands of levels.
 // ================================================================
 
 class _LevelTile extends StatelessWidget {
   final double screenWidth;
-  final double? topXFraction; // null when this is the very top level
+  final double? topXFraction;
   final double bottomXFraction;
   final int level;
   final bool unlocked;
@@ -548,7 +474,6 @@ class _LevelTile extends StatelessWidget {
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          // Path segment for this slot only.
           Positioned.fill(
             child: CustomPaint(
               painter: _PathSegmentPainter(
@@ -557,16 +482,6 @@ class _LevelTile extends StatelessWidget {
               ),
             ),
           ),
-
-          // The level node hangs from a single fixed point - exactly
-          // where the path curve ends for this tile. Centering it
-          // with FractionalTranslation (rather than guessing a fixed
-          // left offset) and giving the node itself a fixed-size,
-          // absolutely-positioned layout (see _LevelNode) means the
-          // ball always sits dead-center on the road at the same
-          // height, whether or not this node is showing stars or the
-          // bounce arrow - that inconsistency was what made the path
-          // look like it was joining nodes at the wrong spot.
           Positioned(
             left: bottomXFraction * screenWidth,
             bottom: 0,
@@ -602,7 +517,7 @@ class _PathSegmentPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (topXFraction == null) return; // top-most level: nothing above it
+    if (topXFraction == null) return;
 
     final Offset top = Offset(topXFraction! * size.width, 0);
     final Offset bottom = Offset(bottomXFraction * size.width, size.height);
@@ -623,8 +538,7 @@ class _PathSegmentPainter extends CustomPainter {
       ..style = PaintingStyle.stroke;
 
     final paint = Paint()
-      ..color =
-          const Color(0xFFC9A97E) // dull sandy-tan, matches the stone path
+      ..color = const Color(0xFFC9A97E)
       ..strokeWidth = 24
       ..strokeCap = StrokeCap.round
       ..style = PaintingStyle.stroke;
@@ -661,11 +575,6 @@ class _LevelNode extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Three distinct looks, matching the reference art's structure
-    // (grey/slate = not reached yet, blue = already cleared) but
-    // with the "play me next" node recolored to this game's pink
-    // theme instead of the reference's green, + glow halo + bouncing
-    // arrow still calling it out.
     late final List<Color> ballColors;
     late final Color rimColor;
     Color glow = Colors.transparent;
@@ -684,11 +593,6 @@ class _LevelNode extends StatelessWidget {
 
     return GestureDetector(
       onTap: unlocked ? onTap : null,
-      // Fixed-size box, bottom-anchored. Every child below is
-      // absolutely positioned from that same bottom edge, so the
-      // ball + pedestal sit at one constant height no matter whether
-      // stars or the bounce arrow are also being drawn - that's what
-      // keeps every node lined up on the path exactly the same way.
       child: SizedBox(
         width: 70,
         height: 132,
@@ -696,12 +600,7 @@ class _LevelNode extends StatelessWidget {
           clipBehavior: Clip.none,
           alignment: Alignment.bottomCenter,
           children: [
-            // Small light "socket" ellipse the ball rests on, like
-            // the reference's pedestal under every node - sits right
-            // where the road ends.
             const Positioned(bottom: 0, child: _Pedestal()),
-
-            // The ball itself, fixed just above the pedestal.
             Positioned(
               bottom: 8,
               child: Container(
@@ -752,11 +651,6 @@ class _LevelNode extends StatelessWidget {
                 ),
               ),
             ),
-
-            // Stars - only for levels actually cleared, floating
-            // below the pedestal. Purely decorative: since it's
-            // absolutely positioned it can never push the ball above
-            // it out of place.
             if (stars > 0)
               Positioned(
                 bottom: -14,
@@ -796,12 +690,6 @@ class _LevelNode extends StatelessWidget {
                   }),
                 ),
               ),
-
-            // Bouncing "play me" arrow - only above the current
-            // level, looping gently to draw the eye like the
-            // reference, now in the theme's pink instead of green.
-            // Absolutely positioned above the ball so it never
-            // affects where the ball/pedestal sit.
             if (current) const Positioned(bottom: 88, child: _BounceArrow()),
           ],
         ),
@@ -811,8 +699,7 @@ class _LevelNode extends StatelessWidget {
 }
 
 // ================================================================
-// PEDESTAL - the little glowing ellipse every node rests on, right
-// where the path meets it.
+// PEDESTAL
 // ================================================================
 
 class _Pedestal extends StatelessWidget {
@@ -832,9 +719,7 @@ class _Pedestal extends StatelessWidget {
 }
 
 // ================================================================
-// BOUNCE ARROW - loops gently above the current level's node,
-// matching the reference art's "play me next" indicator, recolored
-// to the game's pink theme.
+// BOUNCE ARROW
 // ================================================================
 
 class _BounceArrow extends StatefulWidget {
@@ -889,7 +774,6 @@ class _BounceArrowState extends State<_BounceArrow>
 
 // ================================================================
 // ANIMATED SETTINGS BUTTON
-// Gentle idle pulse so the settings button feels alive.
 // ================================================================
 
 class _AnimatedSettingsButton extends StatefulWidget {
@@ -937,9 +821,6 @@ class _AnimatedSettingsButtonState extends State<_AnimatedSettingsButton>
 
 // ================================================================
 // SETTINGS DIALOG
-// Same layout as the reference (title, X close button, 3 toggle
-// rows, Rate Us button) but restyled in the game's pink/peach
-// palette instead of purple.
 // ================================================================
 
 class _SettingsDialog extends StatefulWidget {
@@ -950,7 +831,6 @@ class _SettingsDialog extends StatefulWidget {
 }
 
 class _SettingsDialogState extends State<_SettingsDialog> {
-  // Wire these up to your real audio/haptics manager as needed.
   bool _musicOn = true;
   bool _soundOn = true;
   bool _vibrateOn = true;
@@ -994,7 +874,6 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                   ),
                 ),
                 const SizedBox(height: 20),
-
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 16,
@@ -1029,9 +908,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                     ],
                   ),
                 ),
-
                 const SizedBox(height: 22),
-
                 _PillButton(
                   label: 'Rate Us',
                   icon: Icons.star_rounded,
@@ -1044,8 +921,6 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               ],
             ),
           ),
-
-          // Close (X) button, top-right, overlapping the card edge.
           Positioned(
             top: -14,
             right: -8,
@@ -1101,8 +976,6 @@ class _SettingsRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        // Icon badge — small gradient circle instead of a plain icon,
-        // matches the node/button style used across the rest of the UI.
         Container(
           width: 44,
           height: 44,
@@ -1208,7 +1081,7 @@ class _SettingsRow extends StatelessWidget {
 }
 
 // ================================================================
-// PILL BUTTON (Rate Us style) — with a springy press animation
+// PILL BUTTON
 // ================================================================
 
 class _PillButton extends StatefulWidget {
@@ -1230,7 +1103,6 @@ class _PillButton extends StatefulWidget {
 
 class _PillButtonState extends State<_PillButton>
     with TickerProviderStateMixin {
-  // Press animation — squeeze down on tap, pop back with a bounce.
   late final AnimationController _pressController = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 350),
@@ -1241,9 +1113,6 @@ class _PillButtonState extends State<_PillButton>
     end: 0.92,
   ).chain(CurveTween(curve: Curves.easeOut)).animate(_pressController);
 
-  // Idle "plus" animation — a gentle continuous pulse that loops on
-  // its own (in addition to the press animation) so the button
-  // keeps drawing attention even when nobody is touching it.
   late final AnimationController _pulseController = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 900),
@@ -1264,7 +1133,6 @@ class _PillButtonState extends State<_PillButton>
   void _onTapDown(TapDownDetails _) => _pressController.forward();
 
   void _onTapUp(TapUpDetails _) {
-    // Bounce back with a little overshoot for a playful "pop" feel.
     _pressController.reverse().then((_) {
       _pressController.forward(from: 0).then((_) => _pressController.reverse());
     });
@@ -1282,8 +1150,6 @@ class _PillButtonState extends State<_PillButton>
       child: AnimatedBuilder(
         animation: Listenable.merge([_pressScale, _pulseScale]),
         builder: (context, child) {
-          // Both animations stack: the idle pulse plays constantly,
-          // the press animation multiplies on top of it when tapped.
           return Transform.scale(
             scale: _pressScale.value * _pulseScale.value,
             child: child,

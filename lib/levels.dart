@@ -4,6 +4,7 @@ import 'word_dictionary.dart';
 // ============================================================
 // GAME LEVEL MODEL
 // ============================================================
+
 class GameLevel {
   final int number;
   final List<String> words;
@@ -15,7 +16,8 @@ class GameLevel {
 
   final int world; // 1..8
   final String difficulty; // label for UI
-  /// 0 = none. Metadata for future special bubbles (engine does not use it yet).
+
+  /// 0 = none. Metadata for future special bubbles.
   final int specialTier;
 
   const GameLevel({
@@ -30,11 +32,16 @@ class GameLevel {
   });
 
   bool get showHints => hints.any((h) => h.isNotEmpty);
+
   int get wordCount => words.length;
+
   int get minWordLength => words.map((w) => w.length).reduce(min);
+
   int get maxWordLength => words.map((w) => w.length).reduce(max);
+
   int get totalRequiredLetters => words.fold<int>(0, (t, w) => t + w.length);
 }
+
 // ============================================================
 // WORD BANK
 // ============================================================
@@ -44,12 +51,10 @@ List<String> wordBank = [];
 Future<void> initializeWordBank() async {
   wordBank = (await loadWordList()).toList();
 }
+
+// ============================================================
 // HINTS
 // ============================================================
-//
-// These are used for the first few levels.
-// If a word does not have a custom hint, a generic hint is used.
-//
 
 const Map<String, String> wordHints = {
   'CAT': '🐱 An animal that says meow',
@@ -81,7 +86,8 @@ const Map<String, String> wordHints = {
 
 const int totalAutoLevels = 2000;
 
-/// Hand-made levels. Anything put here replaces the generated level.
+/// Hand-made levels.
+/// Anything put here replaces the generated level.
 const Map<int, GameLevel> levelOverrides = {};
 
 const List<String> worldNames = [
@@ -107,7 +113,7 @@ const List<String> _difficultyLabels = [
 ];
 
 // ============================================================
-// ROADMAP TABLES (level number -> properties)
+// ROADMAP TABLES
 // ============================================================
 
 int worldFor(int n) {
@@ -138,18 +144,47 @@ int wordCountForLevel(int n) {
   return 12;
 }
 
+// ============================================================
+// WORD LENGTH PROGRESSION
+// ============================================================
+//
+// 1   - 100   => 3 letters only
+// 101 - 400   => 3 to 4 letters
+// 401 - 800   => 4 to 5 letters
+// 801 - 1200  => 5 to 6 letters
+// 1201- 1500  => 6 to 7 letters
+// 1501- 2000  => 7 to 8 letters
+//
+// This prevents unrelated lengths from appearing too early.
+// ============================================================
+
 List<int> _lengthRange(int n) {
   if (n <= 100) return [3, 3];
+
   if (n <= 400) return [3, 4];
+
   if (n <= 800) return [4, 5];
+
   if (n <= 1200) return [5, 6];
+
   if (n <= 1500) return [6, 7];
-  if (n <= 1800) return [7, 8];
-  return [8, 8];
+
+  return [7, 8];
+}
+/// Public: level ke liye min/max word length.
+List<int> lengthRangeFor(int n) => _lengthRange(n);
+
+/// Public: preview dialog ke liye label.
+String lengthLabelFor(int n) {
+  final r = _lengthRange(n);
+  return r[0] == r[1]
+      ? '${r[0]} LETTER WORDS'
+      : '${r[0]}–${r[1]} LETTER WORDS';
 }
 
-/// Every 10th level (after 10) is a "breather": shorter words, more shots.
-bool _isBreather(int n) => n > 10 && n % 10 == 0;
+// ============================================================
+// HINTS / SPECIALS / DISTRACTORS
+// ============================================================
 
 int _hintCountForLevel(int n) {
   if (n <= 10) return 3;
@@ -196,17 +231,28 @@ double _extraRatio(int n) {
 // WORD SELECTION
 // ============================================================
 
-final List<String> _uniqueBank = wordBank.toSet().toList();
+// IMPORTANT:
+// This is a getter, not a final variable.
+//
+// wordBank is loaded later by initializeWordBank().
+// Therefore we must read the current wordBank whenever
+// _pickWords() runs.
+
+List<String> get _uniqueBank => wordBank.toSet().toList();
 
 bool _conflicts(String w, List<String> picked) {
   for (final p in picked) {
-    if (p == w || p.contains(w) || w.contains(p)) return true;
+    if (p == w || p.contains(w) || w.contains(p)) {
+      return true;
+    }
   }
+
   return false;
 }
 
 List<String> _pickWords(int n, Random rnd) {
   final int count = wordCountForLevel(n);
+
   final List<int> range = _lengthRange(n);
 
   final int lo = range[0];
@@ -219,87 +265,146 @@ List<String> _pickWords(int n, Random rnd) {
         ..shuffle(rnd);
 
   for (final w in pool) {
-    if (picked.length >= count) break;
+    if (picked.length >= count) {
+      break;
+    }
 
-    if (_conflicts(w, picked)) continue;
+    if (_conflicts(w, picked)) {
+      continue;
+    }
 
     picked.add(w);
   }
 
   return picked;
 }
+
 // ============================================================
-// LETTERS / HINTS / SHOTS
+// LETTERS
 // ============================================================
 
 List<String> _createLetters(List<String> words, int n, Random rnd) {
   final letters = <String>[];
+
   for (final word in words) {
     letters.addAll(word.split(''));
   }
+
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
   for (int i = 0; i < _distractorCount(n); i++) {
     letters.add(alphabet[rnd.nextInt(alphabet.length)]);
   }
+
   return letters;
 }
 
+// ============================================================
+// HINTS
+// ============================================================
+
 List<String> _createHints(List<String> words, int n) {
   final int clues = _hintCountForLevel(n);
+
   return List.generate(words.length, (i) {
-    if (i >= clues) return '';
+    if (i >= clues) {
+      return '';
+    }
+
     final w = words[i];
+
     return wordHints[w] ?? '';
   });
+}
+
+// ============================================================
+// SHOTS
+// ============================================================
+
+int _baseShotsFor(int n) {
+  if (n <= 10) return 24;
+  if (n <= 20) return 28;
+  if (n <= 35) return 33;
+  if (n <= 50) return 38;
+  if (n <= 70) return 45;
+  if (n <= 100) return 60;
+  if (n <= 150) return 70;
+  if (n <= 300) return 88;
+  if (n <= 400) return 105;
+  if (n <= 500) return 135;
+  if (n <= 800) return 160;
+  if (n <= 1200) return 220;
+  if (n <= 1500) return 290;
+  if (n <= 1600) return 340;
+  if (n <= 1950) return 380;
+  if (n <= 1975) return 415;
+  return 450;
 }
 
 int _calculateMaxShots(List<String> words, int n, Random rnd) {
   final int required = words.fold<int>(0, (t, w) => t + w.length);
 
-  int extra;
-  if (n <= 5) {
-    extra = 12; // tutorial: very generous
-  } else {
-    double ratio = _extraRatio(n) + (rnd.nextDouble() * 0.06 - 0.03);
-    if (_isBreather(n)) ratio += 0.2;
-    final int minExtra = n <= 100 ? 9 : (n <= 500 ? 7 : 6);
-    extra = max(minExtra, (required * ratio).round());
-  }
-  return required + extra;
+  // Table ke shots, lekin required letters + 12 se kam kabhi nahi.
+  return max(_baseShotsFor(n), required + 12);
 }
-
 // ============================================================
 // VALIDATION
 // ============================================================
 
 bool _isValid(GameLevel level) {
   final n = level.number;
-  if (level.words.length != wordCountForLevel(n)) return false;
-  if (level.words.toSet().length != level.words.length) return false;
 
+  // Correct number of words.
+  if (level.words.length != wordCountForLevel(n)) {
+    return false;
+  }
+
+  // No duplicate words.
+  if (level.words.toSet().length != level.words.length) {
+    return false;
+  }
+
+  // Validate words and prevent one word
+  // from containing another.
   for (int i = 0; i < level.words.length; i++) {
     final a = level.words[i];
-    if (!RegExp(r'^[A-Z]+$').hasMatch(a)) return false;
+
+    if (!RegExp(r'^[A-Z]+$').hasMatch(a)) {
+      return false;
+    }
+
     for (int j = i + 1; j < level.words.length; j++) {
       final b = level.words[j];
-      if (a.contains(b) || b.contains(a)) return false;
+
+      if (a.contains(b) || b.contains(a)) {
+        return false;
+      }
     }
   }
 
+  // Check that all required letters
+  // actually exist in the level.
   final need = <String, int>{};
+
   for (final w in level.words) {
     for (final c in w.split('')) {
       need[c] = (need[c] ?? 0) + 1;
     }
   }
+
   final have = <String, int>{};
+
   for (final c in level.letters) {
     have[c] = (have[c] ?? 0) + 1;
   }
+
   for (final e in need.entries) {
-    if ((have[e.key] ?? 0) < e.value) return false;
+    if ((have[e.key] ?? 0) < e.value) {
+      return false;
+    }
   }
 
+  // Minimum four extra shots.
   return level.maxShots >= level.totalRequiredLetters + 4;
 }
 
@@ -309,17 +414,25 @@ bool _isValid(GameLevel level) {
 
 GameLevel _createLevel(int n) {
   final GameLevel? custom = levelOverrides[n];
-  if (custom != null) return custom;
+
+  if (custom != null) {
+    return custom;
+  }
 
   final int world = worldFor(n);
+
   GameLevel? last;
 
-  // Seeded, so level N is the same every time the app opens.
+  // Seeded, so level N is the same every time
+  // the app opens.
   for (int attempt = 0; attempt < 20; attempt++) {
     final rnd = Random(n * 7919 + attempt * 104729);
 
     final words = _pickWords(n, rnd);
-    if (words.isEmpty) continue;
+
+    if (words.isEmpty) {
+      continue;
+    }
 
     final level = GameLevel(
       number: n,
@@ -333,9 +446,13 @@ GameLevel _createLevel(int n) {
     );
 
     last = level;
-    if (_isValid(level)) return level;
+
+    if (_isValid(level)) {
+      return level;
+    }
   }
 
+  // Safety fallback.
   return last ??
       GameLevel(
         number: n,
@@ -349,6 +466,7 @@ GameLevel _createLevel(int n) {
 // ============================================================
 // LEVEL LIST + GET LEVEL
 // ============================================================
+
 late List<GameLevel> levels;
 
 void generateLevels() {
@@ -356,7 +474,13 @@ void generateLevels() {
 }
 
 GameLevel getLevel(int levelNumber) {
-  if (levelNumber < 1) levelNumber = 1;
-  if (levelNumber <= levels.length) return levels[levelNumber - 1];
+  if (levelNumber < 1) {
+    levelNumber = 1;
+  }
+
+  if (levelNumber <= levels.length) {
+    return levels[levelNumber - 1];
+  }
+
   return _createLevel(levelNumber);
 }
