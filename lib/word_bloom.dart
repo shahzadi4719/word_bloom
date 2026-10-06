@@ -45,6 +45,7 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
 
   bool _initialized = false;
   bool _confettiPlayed = false;
+  bool _winSaved = false;
 
   bool _showTutorial = false;
   bool _isAiming = false;
@@ -90,9 +91,10 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
 
     _engine.update();
 
-    if (_engine.levelComplete && !_confettiPlayed) {
-      _confettiPlayed = true;
-      _confettiController.play();
+    // Save the win the moment the last word is found, so leaving during
+    // the bonus animation never loses it.
+    if (_engine.goalReached && !_winSaved) {
+      _winSaved = true;
       final int? completed = _engine.currentLevel?.number;
       if (completed != null) {
         final int stars = _engine.starsEarned;
@@ -102,6 +104,12 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
 
         widget.onLevelComplete?.call(completed, stars);
       }
+    }
+
+    // Confetti + result card once the leftover shots have flown out.
+    if (_engine.levelComplete && !_confettiPlayed) {
+      _confettiPlayed = true;
+      _confettiController.play();
     }
 
     setState(() {});
@@ -165,12 +173,14 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
 
   void _restartAndRetry() {
     _confettiPlayed = false;
+    _winSaved = false;
     _engine.retryLevel();
     setState(() {});
   }
 
   void _goNext() {
     _confettiPlayed = false;
+    _winSaved = false;
     _engine.goToNextLevel();
     setState(() {});
   }
@@ -263,20 +273,6 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                     ),
                   ),
 
-                  // TOP UI
-                  Positioned(
-                    top: 12,
-                    left: 14,
-                    right: 14,
-                    child: _TopBar(
-                      level: _engine.currentLevel?.number ?? 1,
-                      score: _engine.score,
-                      lives: _remainingShots,
-                      onBack: () => Navigator.of(context).maybePop(),
-                      onPause: _openPauseMenu,
-                    ),
-                  ),
-
                   // GAME BOARD (board bubbles + bubbles that are falling off)
                   Positioned.fill(
                     child: AnimatedBuilder(
@@ -336,6 +332,43 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                       ),
                     ),
 
+                  // SOLID HEADER band (hides board bubbles behind the top bar)
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    height: size.height * GameEngine.headerY,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            const Color(0xFFCDEFFF),
+                            Color.lerp(
+                              const Color(0xFFCDEFFF),
+                              const Color(0xFFF7F3ED),
+                              GameEngine.headerY,
+                            )!,
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // TOP UI (now above the board and the header band)
+                  Positioned(
+                    top: 12,
+                    left: 14,
+                    right: 14,
+                    child: _TopBar(
+                      level: _engine.currentLevel?.number ?? 1,
+                      score: _engine.score,
+                      onBack: () => Navigator.of(context).maybePop(),
+                      onPause: _openPauseMenu,
+                    ),
+                  ),
+
                   // BUBBLE LAUNCHER RING
                   Positioned(
                     left: 0,
@@ -360,23 +393,36 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                     ),
                   ),
 
-                  // STATUS CHIPS: words goal, timer, board-drop countdown
+                  // LEFTOVER SHOTS flying out of the ring after a win
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: CustomPaint(
+                        painter: _BonusShotPainter(
+                          shots: _engine.bonusShots,
+                          radiusFrac: _engine.bubbleRadius,
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // STATUS CHIPS: words goal (+ letter rule), timer, board drop
                   Positioned(
                     top: 62,
-                    left: 0,
-                    right: 0,
+                    left: 14,
+                    right: 14,
                     child: IgnorePointer(
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
+                      child: Wrap(
+                        alignment: WrapAlignment.center,
+                        spacing: 8,
+                        runSpacing: 6,
                         children: [
                           _InfoChip(
                             icon: Icons.flag_rounded,
                             text:
-                                'Words ${_engine.completedWords.length}/${_engine.currentLevel?.words.length ?? 1}',
+                                'Words ${_engine.completedWords.length}/${_engine.currentLevel?.words.length ?? 1} · ${_engine.lengthRuleText}',
                             color: const Color(0xFFFF4D96),
                           ),
-                          if (_engine.timeLimit > 0) ...[
-                            const SizedBox(width: 8),
+                          if (_engine.timeLimit > 0)
                             _InfoChip(
                               icon: Icons.timer_rounded,
                               text: _formatTime(_engine.timeLeft),
@@ -384,9 +430,7 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                                   ? const Color(0xFFE0554C)
                                   : const Color(0xFF292929),
                             ),
-                          ],
-                          if (_engine.shotsUntilDescend > 0) ...[
-                            const SizedBox(width: 8),
+                          if (_engine.shotsUntilDescend > 0)
                             _InfoChip(
                               icon: Icons.south_rounded,
                               text: 'Drop ${_engine.shotsUntilDescend}',
@@ -394,7 +438,6 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                                   ? const Color(0xFFE0554C)
                                   : const Color(0xFFF2A93B),
                             ),
-                          ],
                         ],
                       ),
                     ),
@@ -412,6 +455,19 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                           color: _engine.swapsLeft == 0
                               ? const Color(0xFFE0554C)
                               : const Color(0xFF7A4A3A),
+                        ),
+                      ),
+                    ),
+
+                  // TOAST: why a word didn't count
+                  if (_engine.toastMessage != null)
+                    Positioned(
+                      top: 118,
+                      left: 24,
+                      right: 24,
+                      child: IgnorePointer(
+                        child: Center(
+                          child: _ToastPill(text: _engine.toastMessage!),
                         ),
                       ),
                     ),
@@ -623,17 +679,59 @@ class _InfoChip extends StatelessWidget {
   }
 }
 
+class _ToastPill extends StatelessWidget {
+  final String text;
+  const _ToastPill({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF292929).withValues(alpha: 0.90),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.18),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.info_outline_rounded,
+            size: 18,
+            color: Color(0xFFFFD23F),
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              text,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _TopBar extends StatelessWidget {
   final int level;
   final int score;
-  final int lives;
   final VoidCallback onBack;
   final VoidCallback onPause;
 
   const _TopBar({
     required this.level,
     required this.score,
-    required this.lives,
     required this.onBack,
     required this.onPause,
   });
@@ -681,27 +779,6 @@ class _TopBar extends StatelessWidget {
                 ),
               ],
             ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        _GlassBox(
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                Icons.favorite_rounded,
-                size: 18,
-                color: Color(0xFFFF5C87),
-              ),
-              const SizedBox(width: 5),
-              Text(
-                '$lives',
-                style: const TextStyle(
-                  fontWeight: FontWeight.w900,
-                  fontSize: 14,
-                ),
-              ),
-            ],
           ),
         ),
         const SizedBox(width: 8),
@@ -859,6 +936,16 @@ class _PauseDialogState extends State<_PauseDialog> {
                   ),
                 ),
                 const SizedBox(height: 22),
+                SizedBox(
+                  width: double.infinity,
+                  child: _PauseActionButton(
+                    label: 'Play',
+                    icon: Icons.play_arrow_rounded,
+                    colors: const [Color(0xFF8EE6B0), Color(0xFF3FBF7F)],
+                    onTap: widget.onResume,
+                  ),
+                ),
+                const SizedBox(height: 12),
                 Row(
                   children: [
                     Expanded(
@@ -1040,11 +1127,13 @@ class _PauseActionButton extends StatelessWidget {
   final String label;
   final List<Color> colors;
   final VoidCallback onTap;
+  final IconData? icon;
 
   const _PauseActionButton({
     required this.label,
     required this.colors,
     required this.onTap,
+    this.icon,
   });
 
   @override
@@ -1066,14 +1155,23 @@ class _PauseActionButton extends StatelessWidget {
             ),
           ],
         ),
-        child: Text(
-          label,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 16,
-            fontWeight: FontWeight.w900,
-            letterSpacing: 0.6,
-          ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Icon(icon, color: Colors.white, size: 24),
+              const SizedBox(width: 6),
+            ],
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 0.6,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -1117,6 +1215,121 @@ class _GlassBox extends StatelessWidget {
 // ================================================================
 // POP EFFECT
 // ================================================================
+class _BonusShotPainter extends CustomPainter {
+  final List<BonusShotBubble> shots;
+  final double radiusFrac;
+
+  const _BonusShotPainter({required this.shots, required this.radiusFrac});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final double r = radiusFrac * size.width;
+
+    for (final BonusShotBubble s in shots) {
+      final double p = s.progress.clamp(0.0, 1.0);
+      const double flightEnd = 0.7;
+
+      if (p < flightEnd) {
+        // flying out of the ring
+        final double t = Curves.easeOut.transform(p / flightEnd);
+        final Offset pos = Offset(
+          (s.startX + (s.endX - s.startX) * t) * size.width,
+          (s.startY + (s.endY - s.startY) * t) * size.height,
+        );
+        _drawBubble(canvas, pos, r * (1.0 - 0.30 * t), s);
+      } else {
+        // pop: ring + "+10" rising and fading
+        final double t = (p - flightEnd) / (1 - flightEnd);
+        final Offset pos = Offset(s.endX * size.width, s.endY * size.height);
+
+        canvas.drawCircle(
+          pos,
+          r * (0.7 + t * 1.5),
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = r * 0.16
+            ..color = s.color.withValues(alpha: (1 - t) * 0.75),
+        );
+
+        final TextPainter tp = TextPainter(
+          text: TextSpan(
+            text: '+${s.points}',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 1 - t),
+              fontSize: r * 0.8,
+              fontWeight: FontWeight.w900,
+              shadows: [
+                Shadow(
+                  color: s.color.withValues(alpha: 1 - t),
+                  blurRadius: 8,
+                ),
+                Shadow(
+                  color: Colors.black.withValues(alpha: 0.35 * (1 - t)),
+                  blurRadius: 3,
+                ),
+              ],
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout();
+
+        tp.paint(
+          canvas,
+          Offset(pos.dx - tp.width / 2, pos.dy - tp.height / 2 - t * r * 1.4),
+        );
+      }
+    }
+  }
+
+  void _drawBubble(Canvas canvas, Offset c, double radius, BonusShotBubble s) {
+    canvas.drawCircle(
+      c,
+      radius * 1.3,
+      Paint()
+        ..shader = RadialGradient(
+          colors: [
+            s.color.withValues(alpha: 0.30),
+            s.color.withValues(alpha: 0.0),
+          ],
+          stops: const [0.7, 1.0],
+        ).createShader(Rect.fromCircle(center: c, radius: radius * 1.3)),
+    );
+
+    canvas.drawCircle(
+      c,
+      radius,
+      Paint()
+        ..shader = RadialGradient(
+          center: const Alignment(-0.35, -0.45),
+          radius: 0.9,
+          colors: [
+            Colors.white.withValues(alpha: 0.48),
+            s.color,
+            s.color.withValues(alpha: 0.78),
+          ],
+          stops: const [0.0, 0.30, 1.0],
+        ).createShader(Rect.fromCircle(center: c, radius: radius)),
+    );
+
+    final TextPainter tp = TextPainter(
+      text: TextSpan(
+        text: s.letter,
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: radius * 0.92,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+
+    tp.paint(canvas, Offset(c.dx - tp.width / 2, c.dy - tp.height / 2));
+  }
+
+  @override
+  bool shouldRepaint(covariant _BonusShotPainter oldDelegate) => true;
+}
+
 class _FlyingPopPainter extends CustomPainter {
   final List<FlyingPopBubble> pops;
 
@@ -1301,12 +1514,9 @@ class _GameBoardPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // CHANGED: rows still hidden above the screen must not draw over
-    // the top bar, so everything above this line is clipped away.
-    canvas.save();
-    canvas.clipRect(
-      Rect.fromLTWH(0, size.height * 0.115, size.width, size.height),
-    );
+    // No hard clip here any more: a clip slices bubbles in half.
+    // Bubbles near the top bar fade out instead (see the loop below),
+    // and the solid header band in the UI hides whatever is left.
 
     final double t = Curves.easeOutBack.transform(
       entranceProgress.clamp(0.0, 1.0),
@@ -1500,119 +1710,194 @@ class _GameBoardPainter extends CustomPainter {
         );
       }
 
-      // LOCK: dimmed letter, steel ring, small "padlock + shots left" pill.
+      // LOCK: a steel chain around the bubble + a padlock badge.
+      // Full chain = 2 hits needed. Half-broken chain and a cracked, open
+      // padlock = 1 hit left. No numbers needed.
       final int? hitsLeft = lockHits[bubble.id];
       if (hitsLeft != null) {
+        final bool damaged = hitsLeft < GameEngine.lockStrength;
+
+        // slightly greyed so it reads as "not usable yet", letter stays visible
         canvas.drawCircle(
           center,
           radius,
-          Paint()..color = const Color(0xFF3A3F55).withValues(alpha: 0.42),
-        );
-
-        // brushed steel ring
-        canvas.drawCircle(
-          center,
-          radius * 0.93,
           Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = radius * 0.13
-            ..shader = const SweepGradient(
-              colors: [
-                Color(0xFFF1F4FA),
-                Color(0xFF8A93A6),
-                Color(0xFFFFFFFF),
-                Color(0xFF7B8497),
-                Color(0xFFF1F4FA),
-              ],
-            ).createShader(Rect.fromCircle(center: center, radius: radius)),
+            ..color = const Color(0xFF3A3F55)
+                .withValues(alpha: damaged ? 0.20 : 0.30),
         );
 
-        // pill at the bottom of the bubble
-        final Offset pillCenter = center.translate(0, radius * 0.62);
-        final RRect pill = RRect.fromRectAndRadius(
-          Rect.fromCenter(
-            center: pillCenter,
-            width: radius * 1.0,
-            height: radius * 0.46,
-          ),
-          Radius.circular(radius * 0.23),
-        );
-        canvas.drawRRect(
-          pill.shift(Offset(0, radius * 0.04)),
+        // chain links around the edge
+        const int linkCount = 10;
+        const Set<int> missing = {1, 2, 6, 7};
+        final double chainR = radius * 0.86;
+
+        for (int k = 0; k < linkCount; k++) {
+          if (damaged && missing.contains(k)) continue;
+
+          final double a = (2 * pi * k / linkCount) - pi / 2;
+          final Offset p =
+              center.translate(cos(a) * chainR, sin(a) * chainR);
+
+          canvas.save();
+          canvas.translate(p.dx, p.dy);
+          canvas.rotate(a + pi / 2);
+
+          if (k.isEven) {
+            // link seen from the front (an open oval)
+            final RRect link = RRect.fromRectAndRadius(
+              Rect.fromCenter(
+                center: Offset.zero,
+                width: radius * 0.50,
+                height: radius * 0.22,
+              ),
+              Radius.circular(radius * 0.11),
+            );
+            canvas.drawRRect(
+              link.shift(Offset(0, radius * 0.04)),
+              Paint()
+                ..style = PaintingStyle.stroke
+                ..strokeWidth = radius * 0.07
+                ..color = Colors.black.withValues(alpha: 0.35),
+            );
+            canvas.drawRRect(
+              link,
+              Paint()
+                ..style = PaintingStyle.stroke
+                ..strokeWidth = radius * 0.07
+                ..color = const Color(0xFFD5DBE6),
+            );
+          } else {
+            // link seen from the side (a short bar)
+            final RRect link = RRect.fromRectAndRadius(
+              Rect.fromCenter(
+                center: Offset.zero,
+                width: radius * 0.30,
+                height: radius * 0.12,
+              ),
+              Radius.circular(radius * 0.06),
+            );
+            canvas.drawRRect(
+              link.shift(Offset(0, radius * 0.04)),
+              Paint()..color = Colors.black.withValues(alpha: 0.35),
+            );
+            canvas.drawRRect(link, Paint()..color = const Color(0xFF9AA3B5));
+          }
+
+          canvas.restore();
+        }
+
+        // padlock badge at the bottom
+        final Offset badge = center.translate(0, radius * 0.78);
+        final double badgeR = radius * 0.30;
+
+        canvas.drawCircle(
+          badge.translate(0, radius * 0.04),
+          badgeR,
           Paint()..color = Colors.black.withValues(alpha: 0.30),
         );
-        canvas.drawRRect(
-          pill,
+        canvas.drawCircle(
+          badge,
+          badgeR,
           Paint()
-            ..shader = const LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Color(0xFF3B4378), Color(0xFF1B1F3B)],
-            ).createShader(pill.outerRect),
+            ..shader = const RadialGradient(
+              center: Alignment(-0.3, -0.4),
+              colors: [Color(0xFF4A5390), Color(0xFF1B1F3B)],
+            ).createShader(Rect.fromCircle(center: badge, radius: badgeR)),
         );
-        canvas.drawRRect(
-          pill,
+        canvas.drawCircle(
+          badge,
+          badgeR,
           Paint()
             ..style = PaintingStyle.stroke
             ..strokeWidth = radius * 0.05
             ..color = const Color(0xFFFFD23F),
         );
 
-        // tiny padlock
-        final Offset lockC = pillCenter.translate(-radius * 0.22, radius * 0.02);
+        // shackle (pops open a little when the lock is damaged)
+        final double lift = damaged ? radius * 0.07 : 0;
         canvas.drawArc(
           Rect.fromCenter(
-            center: lockC.translate(0, -radius * 0.07),
-            width: radius * 0.17,
-            height: radius * 0.20,
+            center: badge.translate(
+              damaged ? radius * 0.05 : 0,
+              -radius * 0.07 - lift,
+            ),
+            width: radius * 0.22,
+            height: radius * 0.26,
           ),
           pi,
           pi,
           false,
           Paint()
             ..style = PaintingStyle.stroke
-            ..strokeWidth = radius * 0.04
+            ..strokeWidth = radius * 0.05
             ..strokeCap = StrokeCap.round
             ..color = const Color(0xFFE6EAF2),
         );
+        // lock body + keyhole
         canvas.drawRRect(
           RRect.fromRectAndRadius(
             Rect.fromCenter(
-              center: lockC.translate(0, radius * 0.03),
-              width: radius * 0.25,
-              height: radius * 0.17,
+              center: badge.translate(0, radius * 0.05),
+              width: radius * 0.30,
+              height: radius * 0.22,
             ),
-            Radius.circular(radius * 0.04),
+            Radius.circular(radius * 0.05),
           ),
           Paint()..color = const Color(0xFFFFD23F),
         );
-
-        // shots still needed to open it
-        final TextPainter hitPainter = TextPainter(
-          text: TextSpan(
-            text: '$hitsLeft',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: radius * 0.34,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          textDirection: TextDirection.ltr,
-        )..layout();
-        hitPainter.paint(
-          canvas,
-          Offset(
-            pillCenter.dx + radius * 0.17 - hitPainter.width / 2,
-            pillCenter.dy - hitPainter.height / 2,
-          ),
+        canvas.drawCircle(
+          badge.translate(0, radius * 0.04),
+          radius * 0.035,
+          Paint()..color = const Color(0xFF1B1F3B),
         );
+
+        // crack across the badge when damaged
+        if (damaged) {
+          final Path crack = Path()
+            ..moveTo(badge.dx - badgeR * 0.5, badge.dy - badgeR * 0.7)
+            ..lineTo(badge.dx - badgeR * 0.05, badge.dy - badgeR * 0.1)
+            ..lineTo(badge.dx + badgeR * 0.25, badge.dy + badgeR * 0.15)
+            ..lineTo(badge.dx + badgeR * 0.55, badge.dy + badgeR * 0.7);
+          canvas.drawPath(
+            crack,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = radius * 0.04
+              ..strokeCap = StrokeCap.round
+              ..color = Colors.white.withValues(alpha: 0.9),
+          );
+        }
       }
     }
 
+    final double headerLine = size.height * GameEngine.headerY;
+
     for (final bubble in bubbles) {
       final double animatedY = bubble.y + offsetY;
-      drawBubble(canvas, size, bubble, overrideY: animatedY);
+
+      final double r = bubble.radius * size.width;
+      final double topEdge = animatedY * size.height - r;
+
+      // 1 = fully below the header, 0 = fully hidden. A bubble sliding
+      // under the header fades out instead of being cut in half.
+      final double fade = r <= 0
+          ? 1.0
+          : (1 + (topEdge - headerLine) / r).clamp(0.0, 1.0);
+
+      if (fade <= 0) continue;
+
+      if (fade < 1) {
+        canvas.saveLayer(
+          Offset.zero & size,
+          Paint()..color = Colors.white.withValues(alpha: fade),
+        );
+        drawBubble(canvas, size, bubble, overrideY: animatedY);
+        canvas.restore();
+      } else {
+        drawBubble(canvas, size, bubble, overrideY: animatedY);
+      }
     }
+
     if (flyingBubble != null) {
       drawBubble(
         canvas,
@@ -1622,9 +1907,6 @@ class _GameBoardPainter extends CustomPainter {
         boostSize: true,
       );
     }
-
-    // CHANGED: closes the clip opened at the top of paint().
-    canvas.restore();
   }
 
   String _displayLetter(Bubble b) {

@@ -22,6 +22,29 @@ class FlyingPopBubble {
   });
 }
 
+/// A leftover shot flying out of the launcher ring after a level is won.
+class BonusShotBubble {
+  final String letter;
+  final Color color;
+  final double startX;
+  final double startY;
+  final double endX;
+  final double endY;
+  final int points;
+  double progress; // 0 -> 1
+
+  BonusShotBubble({
+    required this.letter,
+    required this.color,
+    required this.startX,
+    required this.startY,
+    required this.endX,
+    required this.endY,
+    required this.points,
+    this.progress = 0,
+  });
+}
+
 class GameEngine {
   // ============================================================
   // DICTIONARY (any real word pops, but only within the level's
@@ -91,6 +114,34 @@ class GameEngine {
   double _scrollRemaining = 0;
 
   bool get isScrolling => _scrollRemaining > 0.0005;
+
+  // ---- level-win bonus: leftover shots fly out of the ring --------------
+  static const int pointsPerLeftoverShot = 10;
+
+  final List<BonusShotBubble> bonusShots = [];
+  int bonusShotsLeft = 0;
+  bool _winPending = false;
+  double _winWait = 0;
+  double _bonusTimer = 0;
+  double _bonusInterval = 0.06;
+  int? _lockedStars;
+  final Random _bonusRnd = Random();
+
+  // ---- player feedback --------------------------------------------------
+  /// Short message under the top bar ("too short", "already found").
+  String? toastMessage;
+  double _toastTimer = 0;
+
+  void _showToast(String message) {
+    toastMessage = message;
+    _toastTimer = 1.8;
+  }
+
+  /// e.g. "4 letters" or "3–4 letters" for the current level.
+  String get lengthRuleText {
+    final List<int> r = lengthRangeFor(currentLevel?.number ?? 1);
+    return r[0] == r[1] ? '${r[0]} letters' : '${r[0]}–${r[1]} letters';
+  }
 
   /// All of the level's words have been found (board is clearing).
   bool get goalReached =>
@@ -166,9 +217,12 @@ class GameEngine {
 
   /// Highest y where a shot bubble's center can go (aim line and
   /// bubble both stop here). Raise this number if it hits the top bar.
-  double get _ceilingY => 0.12;
+    double get _ceilingY => headerY + bubbleRadius * _aspect;
 
-  final double dangerLineY = 0.86;
+    final double dangerLineY = 0.86;
+
+  /// Fraction of the screen height covered by the top bar area.
+  static const double headerY = 0.125;
 
   double _aspect = 0.5;
 
@@ -279,6 +333,12 @@ class GameEngine {
 
     foundWord = null;
     wordMessageTimer = 0;
+    toastMessage = null;
+    _toastTimer = 0;
+    _lockedStars = null;
+    _winPending = false;
+    bonusShotsLeft = 0;
+    bonusShots.clear();
 
     if (levelNumber == 1) {
       _createLevelOne();
@@ -384,43 +444,46 @@ class GameEngine {
   // ------------------------------------------------------------
   // DIFFICULTY - what each level gets (all 2000 levels)
   // ------------------------------------------------------------
+  // What arrives when (see the level blueprint):
+  //   15  lock        31 stone + limited swaps     61 hidden letter + falling board
+  //   201 ice         401 wildcard + timer         701 bomb
   int _lockCountFor(int n) {
-    if (n < 40) return 0;
-    if (n <= 100) return 1;
-    if (n <= 300) return 2;
+    if (n < 15) return 0;
+    if (n <= 60) return 1;
+    if (n <= 200) return 2;
     if (n <= 600) return 3;
     if (n <= 1000) return 4;
     return 5;
   }
 
   int _stoneCountFor(int n) {
-    if (n <= 100) return 0;
-    if (n <= 300) return 1;
-    if (n <= 600) return 2;
-    if (n <= 1000) return 3;
-    if (n <= 1500) return 4;
+    if (n <= 30) return 0;
+    if (n <= 200) return 1;
+    if (n <= 400) return 2;
+    if (n <= 700) return 3;
+    if (n <= 1100) return 4;
     return 5;
   }
 
   int _hiddenCountFor(int n) {
-    if (n < 201) return 0;
-    if (n <= 500) return 1;
-    if (n <= 1000) return 2;
-    if (n <= 1500) return 3;
+    if (n < 61) return 0;
+    if (n <= 200) return 1;
+    if (n <= 500) return 2;
+    if (n <= 1000) return 3;
     return 4;
   }
 
   int _iceCountFor(int n) {
-    if (n < 301) return 0;
-    if (n < 701) return 1;
-    if (n < 1101) return 2;
-    if (n < 1501) return 3;
+    if (n < 201) return 0;
+    if (n < 500) return 1;
+    if (n < 900) return 2;
+    if (n < 1300) return 3;
     return 4;
   }
 
-  /// Helper: every second level from 601.
+  /// Helper: every second level from 701.
   int _bombCountFor(int n) {
-    if (n < 601 || n.isOdd) return 0;
+    if (n < 701 || n.isOdd) return 0;
     return n < 1201 ? 1 : 2;
   }
 
@@ -432,9 +495,10 @@ class GameEngine {
 
   /// Swaps allowed per level (-1 = unlimited).
   int _swapLimitFor(int n) {
-    if (n <= 100) return -1;
-    if (n <= 300) return 15;
-    if (n <= 600) return 10;
+    if (n <= 30) return -1;
+    if (n <= 100) return 20;
+    if (n <= 300) return 12;
+    if (n <= 600) return 9;
     if (n <= 1000) return 7;
     if (n <= 1500) return 5;
     return 3;
@@ -442,22 +506,29 @@ class GameEngine {
 
   /// Seconds for the whole level, 0 = no timer.
   double _timeLimitFor(int n, int wordCount) {
-    final bool timed = (n >= 500 && n % 10 == 0) || (n >= 1200 && n % 5 == 0);
+    final bool timed = (n >= 400 && n % 10 == 0) || (n >= 1100 && n % 5 == 0);
     return timed ? 40.0 + wordCount * 30.0 : 0;
   }
 
   /// The board drops one row every N shots (0 = never).
+  /// Only every third level, starting at level 61.
   int _descendEveryFor(int n) {
-    if (n < 600 || n % 4 != 0) return 0;
+    if (n < 61 || n % 3 != 0) return 0;
+    if (n < 600) return 16;
     if (n < 1200) return 12;
     if (n < 1700) return 10;
     return 9;
   }
 
+  /// "Breather" levels: after a few hard ones the player gets an easier
+  /// one (levels 35, 45, 55 ...): half the obstacles, no timer, no drop.
+  bool _isBreather(int n) => n > 30 && n % 10 == 5;
+
+  /// Shooter letters: how scarce vowels are.
   int _poolTierFor(int n) {
-    if (n <= 300) return 0;
-    if (n <= 800) return 1;
-    if (n <= 1400) return 2;
+    if (n <= 30) return 0;
+    if (n <= 200) return 1;
+    if (n <= 700) return 2;
     return 3;
   }
 
@@ -466,10 +537,10 @@ class GameEngine {
 
     _poolTier = _poolTierFor(n);
     swapsLeft = _swapLimitFor(n);
-    descendEvery = _descendEveryFor(n);
+    descendEvery = _isBreather(n) ? 0 : _descendEveryFor(n);
     _shotsSinceDescend = 0;
 
-    timeLimit = _timeLimitFor(n, wordCount);
+    timeLimit = _isBreather(n) ? 0 : _timeLimitFor(n, wordCount);
     timeLeft = timeLimit;
     timeUp = false;
     _lastTick = null;
@@ -498,6 +569,9 @@ class GameEngine {
     // Seeded: level N always gets the same obstacles.
     final Random rnd = Random(n * 31 + 7);
 
+    // breather levels get half the obstacles
+    int cut(int v) => _isBreather(n) ? v ~/ 2 : v;
+
     // Never the top row.
     final double firstRowLimit =
         _topRowY + _scrollOffset + verticalSpacing * 0.5;
@@ -520,18 +594,18 @@ class GameEngine {
     for (int k = 0; k < _bombCountFor(n) && hasRoom(); k++, i++) {
       bombIds.add(candidates[i].id);
     }
-    for (int k = 0; k < _stoneCountFor(n) && hasRoom(); k++, i++) {
+    for (int k = 0; k < cut(_stoneCountFor(n)) && hasRoom(); k++, i++) {
       final Bubble st =
           _replaceBubble(candidates[i], '#', const Color(0xFF7D8491));
       stoneIds.add(st.id);
     }
-    for (int k = 0; k < _lockCountFor(n) && hasRoom(); k++, i++) {
+    for (int k = 0; k < cut(_lockCountFor(n)) && hasRoom(); k++, i++) {
       lockHits[candidates[i].id] = lockStrength;
     }
-    for (int k = 0; k < _iceCountFor(n) && hasRoom(); k++, i++) {
+    for (int k = 0; k < cut(_iceCountFor(n)) && hasRoom(); k++, i++) {
       iceIds.add(candidates[i].id);
     }
-    for (int k = 0; k < _hiddenCountFor(n) && hasRoom(); k++, i++) {
+    for (int k = 0; k < cut(_hiddenCountFor(n)) && hasRoom(); k++, i++) {
       hiddenIds.add(candidates[i].id);
     }
   }
@@ -662,7 +736,7 @@ class GameEngine {
 
   /// Swaps the ball about to be fired with the one right after it.
   bool swapNextTwo() {
-    if (shooting || levelComplete || gameOver || currentLevel == null) {
+    if (shooting || levelComplete || gameOver || goalReached || currentLevel == null) {
       return false;
     }
     if (swapsLeft == 0) return false;
@@ -823,6 +897,16 @@ class GameEngine {
     _updatePopAnimation();
     _updateFalling();
     _updateScroll();
+    _updateWin();
+    _updateBonusShots();
+
+    if (_toastTimer > 0) {
+      _toastTimer -= 0.016;
+      if (_toastTimer <= 0) {
+        _toastTimer = 0;
+        toastMessage = null;
+      }
+    }
 
     if (wordMessageTimer > 0) {
       wordMessageTimer -= 0.016;
@@ -1008,6 +1092,8 @@ class GameEngine {
 
     List<Bubble> best = [];
     String bestWord = '';
+    String? tooShortWord; // a real word, but too short for this level
+    String? repeatedWord; // a real word that was already found
     final List<Bubble> path = [];
     final Set<int> used = {};
 
@@ -1031,10 +1117,25 @@ class GameEngine {
         if (next.length >= minLen &&
             next.length <= maxLen &&
             _dictionary.contains(next) &&
+            !completedWords.contains(next) && // every word counts once
             path.any((b) => b.id == shot.id) &&
             next.length > bestWord.length) {
           bestWord = next;
           best = List<Bubble>.from(path);
+        }
+
+        // real words that don't count: tell the player why
+        if (_dictionary.contains(next) &&
+            next.length >= minWordLength &&
+            path.any((b) => b.id == shot.id)) {
+          if (next.length < minLen) {
+            if (tooShortWord == null || next.length > tooShortWord!.length) {
+              tooShortWord = next;
+            }
+          }
+          if (next.length >= minLen && completedWords.contains(next)) {
+            repeatedWord ??= next;
+          }
         }
 
         if (next.length < maxLen) {
@@ -1054,6 +1155,10 @@ class GameEngine {
 
     if (best.isNotEmpty) {
       _popWord(bestWord, best);
+    } else if (tooShortWord != null) {
+      _showToast('$tooShortWord is too short — use $lengthRuleText');
+    } else if (repeatedWord != null) {
+      _showToast('$repeatedWord is already found');
     }
     _checkGameOver();
   }
@@ -1107,12 +1212,6 @@ class GameEngine {
     // Last word found: everything left on the board falls away.
     if (goalReached) _cascadeBoard();
 
-    Future<void>.delayed(Duration(milliseconds: goalReached ? 1300 : 550), () {
-      if (currentLevel != null &&
-          completedWords.length >= currentLevel!.words.length) {
-        levelComplete = true;
-      }
-    });
   }
 
   void _updatePopAnimation() {
@@ -1281,9 +1380,71 @@ class GameEngine {
       rank++;
     }
 
-    final int shotsLeft =
-        max(0, (currentLevel?.maxShots ?? 0) - shotsUsed);
-    score += shotsLeft * 10;
+    // Stars are decided NOW, before the leftover shots are spent.
+    _lockedStars = _computeStars();
+
+    // Leftover shots fly out of the ring one by one (see _updateWin).
+    bonusShotsLeft = max(0, (currentLevel?.maxShots ?? 0) - shotsUsed);
+    _bonusInterval =
+        (2.4 / max(1, bonusShotsLeft)).clamp(0.035, 0.12).toDouble();
+    _bonusTimer = 0;
+    _winWait = 1.0; // let the board finish falling first
+    _winPending = true;
+  }
+
+  /// Win sequence: board falls -> leftover shots leave the ring one by
+  /// one (+points each) -> the result card appears.
+  void _updateWin() {
+    if (!_winPending) return;
+
+    if (_winWait > 0) {
+      _winWait -= 0.016;
+      return;
+    }
+
+    if (bonusShotsLeft > 0) {
+      _bonusTimer -= 0.016;
+      if (_bonusTimer <= 0) {
+        _bonusTimer = _bonusInterval;
+        _emitBonusShot();
+      }
+      return;
+    }
+
+    // wait until the last flying bubble has finished
+    if (bonusShots.isNotEmpty) return;
+
+    _winPending = false;
+    levelComplete = true;
+  }
+
+  void _emitBonusShot() {
+    final String letter = getNextLetter();
+
+    bonusShots.add(
+      BonusShotBubble(
+        letter: letter,
+        color: _colorForLetter(letter),
+        startX: 0.5,
+        startY: 0.80,
+        endX: 0.12 + _bonusRnd.nextDouble() * 0.76,
+        endY: 0.20 + _bonusRnd.nextDouble() * 0.32,
+        points: pointsPerLeftoverShot,
+      ),
+    );
+
+    shotsUsed++; // the number in the ring counts down
+    bonusShotsLeft--;
+    score += pointsPerLeftoverShot;
+  }
+
+  void _updateBonusShots() {
+    if (bonusShots.isEmpty) return;
+
+    for (final BonusShotBubble b in List<BonusShotBubble>.from(bonusShots)) {
+      b.progress += 0.032;
+      if (b.progress >= 1) bonusShots.remove(b);
+    }
   }
 
   void _updateFalling() {
@@ -1312,7 +1473,7 @@ class GameEngine {
   // ============================================================
 
   /// Hidden rows above the screen can't be used for words yet.
-  bool _isOnScreen(Bubble b) => b.y >= _ceilingY - 0.03;
+    bool _isOnScreen(Bubble b) => b.y >= _ceilingY - 0.01;
 
   void _requestScroll() {
     if (bubbles.isEmpty || _scrollOffset >= -0.001) return;
@@ -1402,7 +1563,9 @@ class GameEngine {
   }
 
   /// 1-3 stars based on how efficiently the level was cleared.
-  int get starsEarned {
+  int get starsEarned => _lockedStars ?? _computeStars();
+
+  int _computeStars() {
     final GameLevel? level = currentLevel;
     if (level == null || level.maxShots == 0) return 3;
 

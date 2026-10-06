@@ -129,52 +129,70 @@ int worldFor(int n) {
 
 String worldNameFor(int n) => worldNames[worldFor(n) - 1];
 
+// ============================================================
+// HOW MANY WORDS PER LEVEL
+// ============================================================
+//
+// 1   - 5     => 1
+// 6   - 15    => 2
+// 16  - 60    => 3
+// 61  - 200   => 4
+// 201 - 400   => 5
+// 401 - 900   => 6
+// 901 - 1600  => 7
+// 1601- 2000  => 8
+//
+// Mobile players don't enjoy 12-word levels, so the count stops
+// at 8. Difficulty comes from word length + obstacles instead.
+// ============================================================
+
 int wordCountForLevel(int n) {
   if (n <= 5) return 1;
-  if (n <= 20) return 2;
-  if (n <= 70) return 3;
-  if (n <= 150) return 4;
-  if (n <= 300) return 5;
-  if (n <= 500) return 6;
-  if (n <= 800) return 7;
-  if (n <= 1200) return 8;
-  if (n <= 1600) return 9;
-  if (n <= 1950) return 10;
-  if (n <= 1975) return 11;
-  return 12;
+  if (n <= 15) return 2;
+  if (n <= 60) return 3;
+  if (n <= 200) return 4;
+  if (n <= 400) return 5;
+  if (n <= 900) return 6;
+  if (n <= 1600) return 7;
+  return 8;
 }
 
 // ============================================================
 // WORD LENGTH PROGRESSION
 // ============================================================
 //
-// 1   - 100   => 3 letters only
-// 101 - 400   => 3 to 4 letters
-// 401 - 800   => 4 to 5 letters
-// 801 - 1200  => 5 to 6 letters
-// 1201- 1500  => 6 to 7 letters
-// 1501- 2000  => 7 to 8 letters
+// 1    - 30    => 3 letters
+// 31   - 60    => 3 to 4 letters
+// 61   - 200   => 4 letters
+// 201  - 400   => 4 to 5 letters
+// 401  - 700   => 5 letters
+// 701  - 1100  => 5 to 6 letters
+// 1101 - 2000  => 6 to 7 letters
 //
-// This prevents unrelated lengths from appearing too early.
+// The game engine uses the same table (lengthRangeFor) to decide
+// which dictionary words are allowed to pop on each level.
 // ============================================================
 
 List<int> _lengthRange(int n) {
-  if (n <= 100) return [3, 3];
+  if (n <= 30) return [3, 3];
 
-  if (n <= 400) return [3, 4];
+  if (n <= 60) return [3, 4];
 
-  if (n <= 800) return [4, 5];
+  if (n <= 200) return [4, 4];
 
-  if (n <= 1200) return [5, 6];
+  if (n <= 400) return [4, 5];
 
-  if (n <= 1500) return [6, 7];
+  if (n <= 700) return [5, 5];
 
-  return [7, 8];
+  if (n <= 1100) return [5, 6];
+
+  return [6, 7];
 }
-/// Public: level ke liye min/max word length.
+
+/// Public: min/max word length for a level.
 List<int> lengthRangeFor(int n) => _lengthRange(n);
 
-/// Public: preview dialog ke liye label.
+/// Public: label for the level preview dialog.
 String lengthLabelFor(int n) {
   final r = _lengthRange(n);
   return r[0] == r[1]
@@ -214,17 +232,6 @@ int _distractorCount(int n) {
   if (n <= 500) return 14;
   if (n <= 750) return 16;
   return 18;
-}
-
-double _extraRatio(int n) {
-  if (n <= 100) return 0.9;
-  if (n <= 300) return 0.7;
-  if (n <= 500) return 0.6;
-  if (n <= 800) return 0.5;
-  if (n <= 1000) return 0.45;
-  if (n <= 1400) return 0.4;
-  if (n <= 1700) return 0.35;
-  return 0.3;
 }
 
 // ============================================================
@@ -320,33 +327,37 @@ List<String> _createHints(List<String> words, int n) {
 // ============================================================
 // SHOTS
 // ============================================================
+//
+// shots = (total letters of the level's words) x ratio
+//
+// The ratio goes UP with the level (2.2 -> 3.0): longer words are
+// much harder to chain from random board letters, so late levels
+// need more shots per letter, not fewer.
+//
+// Never below 24 (+1 every 60 levels), and never below
+// required letters + 12.
+//
+//   level 1     -> 24
+//   level 84    -> ~36
+//   level 300   -> ~52
+//   level 1000  -> ~100
+//   level 2000  -> ~156
+// ============================================================
 
-int _baseShotsFor(int n) {
-  if (n <= 10) return 24;
-  if (n <= 20) return 28;
-  if (n <= 35) return 33;
-  if (n <= 50) return 38;
-  if (n <= 70) return 45;
-  if (n <= 100) return 60;
-  if (n <= 150) return 70;
-  if (n <= 300) return 88;
-  if (n <= 400) return 105;
-  if (n <= 500) return 135;
-  if (n <= 800) return 160;
-  if (n <= 1200) return 220;
-  if (n <= 1500) return 290;
-  if (n <= 1600) return 340;
-  if (n <= 1950) return 380;
-  if (n <= 1975) return 415;
-  return 450;
-}
+double _shotRatio(int n) => 2.2 + (n.clamp(1, 2000) / 2000) * 0.8;
 
 int _calculateMaxShots(List<String> words, int n, Random rnd) {
   final int required = words.fold<int>(0, (t, w) => t + w.length);
 
-  // Table ke shots, lekin required letters + 12 se kam kabhi nahi.
-  return max(_baseShotsFor(n), required + 12);
+  final int byLetters = (required * _shotRatio(n)).round();
+  final int floorShots = 24 + n ~/ 60;
+
+  // tiny random variation so neighbouring levels don't feel identical
+  final int wiggle = n <= 5 ? 0 : rnd.nextInt(3);
+
+  return max(max(byLetters, floorShots), required + 12) + wiggle;
 }
+
 // ============================================================
 // VALIDATION
 // ============================================================
@@ -459,7 +470,7 @@ GameLevel _createLevel(int n) {
         words: const ['CAT'],
         hints: const ['🐱 An animal that says meow'],
         letters: const ['C', 'A', 'T', 'X', 'Z', 'Q'],
-        maxShots: 15,
+        maxShots: 24,
       );
 }
 

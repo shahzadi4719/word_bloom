@@ -11,43 +11,33 @@ class LevelSelectScreen extends StatefulWidget {
   State<LevelSelectScreen> createState() => _LevelSelectScreenState();
 }
 
-class _LevelSelectScreenState extends State<LevelSelectScreen> {
-  // ==============================================================
-  // PLAYER PROGRESS
-  // ==============================================================
-
+class _LevelSelectScreenState extends State<LevelSelectScreen>
+    with SingleTickerProviderStateMixin {
   int _unlockedLevel = 1;
-
-  final Map<int, int> _levelStars = {};
-
+  Map<int, int> _levelStars = {};
   bool _progressLoaded = false;
 
   final ScrollController _scrollController = ScrollController();
 
-  // ==============================================================
-  // WORLD 1 — auto-generated levels
-  // ==============================================================
-
   static const int _totalLevels = 2000;
 
-  static const double _nodeSpacing = 150;
+  static const double _nodeSpacing = 172;
+  static const double _nodeTop = 55;
+  static const double _nodeCenterY = 90; // _nodeTop + 35 (half of 70px sphere)
 
-  static const List<double> _xPattern = [
-    0.85,
-    0.25,
-    0.75,
-    0.20,
-    0.80,
-    0.35,
-    0.70,
-    0.15,
-  ];
+  // right -> center -> left -> center -> repeat (same as the reference)
+  static const List<double> _xPattern = [0.80, 0.50, 0.20, 0.50];
 
-  double _xFor(int levelIndex) => _xPattern[levelIndex % _xPattern.length];
+  static double _xFor(int levelIndex) =>
+      _xPattern[levelIndex % _xPattern.length];
 
-  // ==============================================================
-  // INIT
-  // ==============================================================
+  // Direction the road travels (left/right) when passing through a node.
+  // 0 means the node is on an edge, so the road turns and runs vertically.
+  static double _tangentDx(int levelIndex) {
+    final double x = _xFor(levelIndex);
+    if ((x - 0.5).abs() > 0.01) return 0;
+    return (_xFor(levelIndex + 1) - _xFor(levelIndex - 1)).sign;
+  }
 
   @override
   void initState() {
@@ -55,64 +45,39 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
     _loadProgress(jumpToLevel: true);
   }
 
-  // ==============================================================
-  // PERSISTENCE
-  // ==============================================================
-
   Future<void> _loadProgress({bool jumpToLevel = false}) async {
-    final int savedUnlocked = await ProgressService.getUnlockedLevel();
-    final Map<int, int> savedStars = await ProgressService.getLevelStars();
-
-    debugPrint(
-      'LevelSelectScreen: loaded unlocked=$savedUnlocked '
-      'stars=$savedStars',
-    );
+    final unlocked = await ProgressService.getUnlockedLevel();
+    final stars = await ProgressService.getLevelStars();
 
     if (!mounted) return;
 
     setState(() {
-      _unlockedLevel = savedUnlocked.clamp(1, _totalLevels);
-      _levelStars
-        ..clear()
-        ..addAll(savedStars);
+      _unlockedLevel = unlocked.clamp(1, _totalLevels);
+      _levelStars = stars;
       _progressLoaded = true;
     });
 
     if (jumpToLevel) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _scrollToUnlockedLevel(animate: false);
+        _scrollToUnlockedLevel();
       });
     }
   }
 
-  void _scrollToUnlockedLevel({required bool animate}) {
+  void _scrollToUnlockedLevel() {
     if (!_scrollController.hasClients) return;
 
     final int listIndex = _totalLevels - _unlockedLevel;
-    final double target =
-        (listIndex * _nodeSpacing) -
-        (_scrollController.position.viewportDimension / 2) +
-        (_nodeSpacing / 2);
 
-    final double clamped = target.clamp(
-      _scrollController.position.minScrollExtent,
-      _scrollController.position.maxScrollExtent,
-    );
+    final double targetOffset =
+        listIndex * _nodeSpacing - (MediaQuery.of(context).size.height * 0.45);
 
-    if (animate) {
-      _scrollController.animateTo(
-        clamped,
-        duration: const Duration(milliseconds: 500),
-        curve: Curves.easeInOut,
-      );
-    } else {
-      _scrollController.jumpTo(clamped);
-    }
+    final double maxScroll = _scrollController.position.maxScrollExtent;
+
+    final double finalOffset = targetOffset.clamp(0.0, maxScroll);
+
+    _scrollController.jumpTo(finalOffset);
   }
-
-  // ==============================================================
-  // DISPOSE
-  // ==============================================================
 
   @override
   void dispose() {
@@ -126,330 +91,298 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
     final GameLevel lv = getLevel(levelNumber);
     final int stars = _levelStars[levelNumber] ?? 0;
 
-    // CHANGED: label now comes from levels.dart (single source of truth)
-    final String lengthText = lengthLabelFor(levelNumber);
+    final String lengthLabel = lv.words.length <= 3
+        ? 'Short'
+        : lv.words.length <= 5
+        ? 'Medium'
+        : 'Long';
 
     showDialog(
       context: context,
-      barrierColor: Colors.black.withValues(alpha: 0.55),
-      builder: (dialogContext) => Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.symmetric(horizontal: 40),
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Container(
-              padding: const EdgeInsets.fromLTRB(22, 26, 22, 22),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Color(0xFFFFDCEA), Color(0xFFFFC2DC)],
-                ),
-                borderRadius: BorderRadius.circular(28),
-                border: Border.all(color: Colors.white, width: 3),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.25),
-                    blurRadius: 20,
-                    offset: const Offset(0, 10),
-                  ),
-                ],
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'LEVEL $levelNumber',
-                    style: const TextStyle(
-                      fontSize: 26,
-                      fontWeight: FontWeight.w900,
-                      color: Color(0xFF7A4A3A),
-                      shadows: [Shadow(color: Colors.white, blurRadius: 4)],
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'World ${lv.world} · ${worldNames[lv.world - 1]} · ${lv.difficulty}',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF9C6E5C),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.5),
-                      borderRadius: BorderRadius.circular(18),
-                    ),
-                    child: Column(
-                      children: [
-                        Text(
-                          lv.wordCount == 1
-                              ? '1 WORD'
-                              : '${lv.wordCount} WORDS',
-                          style: const TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.w900,
-                            color: Color(0xFFFF4D96),
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          lengthText,
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w800,
-                            color: Color(0xFF7A4A3A),
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '${lv.maxShots} SHOTS',
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF9C6E5C),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: List.generate(
-                      3,
-                      (i) => Icon(
-                        Icons.star_rounded,
-                        size: 34,
-                        color: i < stars
-                            ? const Color(0xFFFFD23F)
-                            : Colors.white.withValues(alpha: 0.7),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  _PillButton(
-                    label: 'PLAY',
-                    icon: Icons.play_arrow_rounded,
-                    colors: const [Color(0xFFFF9BC4), Color(0xFFFF4D96)],
-                    onTap: () {
-                      Navigator.of(dialogContext).pop();
-                      _openLevel(levelNumber);
-                    },
-                  ),
-                ],
-              ),
-            ),
-            Positioned(
-              top: -14,
-              right: -8,
-              child: GestureDetector(
-                onTap: () => Navigator.of(dialogContext).pop(),
-                child: Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: const Color(0xFFE0554C),
-                    border: Border.all(color: Colors.white, width: 3),
-                  ),
-                  child: const Icon(
-                    Icons.close_rounded,
-                    color: Colors.white,
-                    size: 22,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ==============================================================
-  // OPEN LEVEL
-  // ==============================================================
-
-  void _openLevel(int levelNumber) async {
-    if (levelNumber > _unlockedLevel) return;
-
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => WordBloom(
-          startLevel: levelNumber,
-          onLevelComplete: (completedLevel, starsEarned) {
-            if (!mounted) return;
-            setState(() {
-              final int existingStars = _levelStars[completedLevel] ?? 0;
-              _levelStars[completedLevel] = starsEarned > existingStars
-                  ? starsEarned
-                  : existingStars;
-
-              if (completedLevel >= _unlockedLevel &&
-                  completedLevel < _totalLevels &&
-                  completedLevel < levels.length) {
-                _unlockedLevel = completedLevel + 1;
-              }
-            });
-          },
-        ),
-      ),
-    );
-
-    await _loadProgress();
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scrollToUnlockedLevel(animate: true);
-    });
-  }
-
-  // ==============================================================
-  // SETTINGS DIALOG
-  // ==============================================================
-
-  void _showSettingsDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      barrierColor: Colors.black.withValues(alpha: 0.55),
-      builder: (context) => const _SettingsDialog(),
-    );
-  }
-
-  // ==============================================================
-  // BUILD
-  // ==============================================================
-
-  @override
-  Widget build(BuildContext context) {
-    final double screenWidth = MediaQuery.of(context).size.width;
-
-    if (!_progressLoaded) {
-      return Scaffold(
-        backgroundColor: const Color(0xFFE3C6B4),
-        body: Stack(
-          fit: StackFit.expand,
-          children: [
-            Image.asset('assets/images/level_select_bg.png', fit: BoxFit.cover),
-            const Center(child: CircularProgressIndicator()),
-          ],
-        ),
-      );
-    }
-    return Scaffold(
-      backgroundColor: const Color(0xFFE3C6B4),
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          Positioned.fill(
-            child: Image.asset(
-              'assets/images/level_select_bg.png',
-              fit: BoxFit.cover,
-              alignment: Alignment.center,
-            ),
+      builder: (_) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 28,
+            vertical: 24,
           ),
-          SafeArea(
-            bottom: false,
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(22, 22, 22, 20),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFFFFE8F2), Color(0xFFF8D2E2)],
+              ),
+              borderRadius: BorderRadius.circular(30),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.9),
+                width: 2,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFFB56B8D).withValues(alpha: 0.25),
+                  blurRadius: 30,
+                  offset: const Offset(0, 15),
+                ),
+              ],
+            ),
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 10,
-                  ),
-                  child: Row(
-                    children: [
-                      _RoundIconButton(
-                        icon: Icons.arrow_back_rounded,
-                        onTap: () {
-                          Navigator.of(context).maybePop();
-                        },
-                      ),
-                      const SizedBox(width: 12),
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'World 1',
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.w900,
-                                color: Color(0xFF7A4A3A),
-                                shadows: [
-                                  Shadow(color: Colors.white70, blurRadius: 4),
-                                ],
-                              ),
-                            ),
-                            Text(
-                              'Misty Cliff',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF9C6E5C),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      _AnimatedSettingsButton(
-                        onTap: () => _showSettingsDialog(context),
-                      ),
-                    ],
+                const Text(
+                  'LEVEL',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 2,
+                    color: Color(0xFF9A607A),
                   ),
                 ),
-                Expanded(
-                  child: ListView.builder(
-                    controller: _scrollController,
-                    physics: const BouncingScrollPhysics(),
-                    itemCount: _totalLevels,
-                    itemExtent: _nodeSpacing,
-                    itemBuilder: (context, listIndex) {
-                      final int level = _totalLevels - listIndex;
-                      final int levelIndex = level - 1; // 0-based
-
-                      final double bottomX = _xFor(levelIndex);
-                      final bool hasLevelAbove = level < _totalLevels;
-                      final double? topX = hasLevelAbove
-                          ? _xFor(levelIndex + 1)
-                          : null;
-
-                      return _LevelTile(
-                        screenWidth: screenWidth,
-                        topXFraction: topX,
-                        bottomXFraction: bottomX,
-                        level: level,
-                        unlocked: level <= _unlockedLevel,
-                        current: level == _unlockedLevel,
-                        stars: _levelStars[level] ?? 0,
-                        onTap: () => _showLevelPreview(level),
-                      );
-                    },
+                const SizedBox(height: 3),
+                Text(
+                  '$levelNumber',
+                  style: const TextStyle(
+                    fontSize: 42,
+                    fontWeight: FontWeight.w900,
+                    color: Color(0xFF7B405D),
                   ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'World 1 • Misty Cliff',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF9A607A),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _InfoBox(
+                        icon: Icons.auto_awesome,
+                        title: 'Difficulty',
+                        value: lv.difficulty,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _InfoBox(
+                        icon: Icons.text_fields_rounded,
+                        title: 'Words',
+                        value: '${lv.words.length}',
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _InfoBox(
+                        icon: Icons.short_text_rounded,
+                        title: 'Length',
+                        value: lengthLabel,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _InfoBox(
+                        icon: Icons.star_rounded,
+                        title: 'Stars',
+                        value: '$stars / 3',
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 15),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(
+                    3,
+                    (index) => Icon(
+                      index < stars
+                          ? Icons.star_rounded
+                          : Icons.star_border_rounded,
+                      size: 27,
+                      color: const Color(0xFFFFB52E),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                _PillButton(
+                  label: 'PLAY',
+                  icon: Icons.play_arrow_rounded,
+                  onTap: () {
+                    Navigator.pop(context);
+                    _openLevel(levelNumber);
+                  },
                 ),
               ],
             ),
           ),
-        ],
+        );
+      },
+    );
+  }
+
+  void _openLevel(int levelNumber) {
+    if (levelNumber > _unlockedLevel) return;
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => WordBloom(
+          startLevel: levelNumber,
+          onLevelComplete: (level, stars) async {
+            await ProgressService.saveLevelResult(level, stars);
+
+            await _loadProgress();
+          },
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_progressLoaded) {
+      return const Scaffold(
+        backgroundColor: Color(0xFFFFEDF4),
+        body: Center(
+          child: CircularProgressIndicator(color: Color(0xFFD979A7)),
+        ),
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFFFEDF4),
+      body: SafeArea(
+        child: Stack(
+          children: [
+            const Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Color(0xFFFFF4F8),
+                      Color(0xFFF9DFEA),
+                      Color(0xFFFFEDF4),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Positioned.fill(
+              child: CustomPaint(painter: _RoadPainter(_scrollController)),
+            ),
+            ListView.builder(
+              controller: _scrollController,
+              reverse: false,
+              physics: const BouncingScrollPhysics(),
+              padding: const EdgeInsets.only(top: 105, bottom: 100),
+              itemCount: _totalLevels,
+              itemExtent: _nodeSpacing,
+              itemBuilder: (context, listIndex) {
+                final int level = _totalLevels - listIndex;
+                return _LevelTile(
+                  level: level,
+                  unlocked: level <= _unlockedLevel,
+                  current: level == _unlockedLevel,
+                  stars: _levelStars[level] ?? 0,
+                  onTap: () => _showLevelPreview(level),
+                );
+              },
+            ),
+
+            // Top bar
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF7FA).withValues(alpha: 0.96),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.05),
+                      blurRadius: 12,
+                      offset: const Offset(0, 5),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    _RoundIconButton(
+                      icon: Icons.arrow_back_rounded,
+                      onTap: () {
+                        Navigator.pop(context);
+                      },
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: const [
+                          Text(
+                            'World 1',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF9A607A),
+                            ),
+                          ),
+                          SizedBox(height: 1),
+                          Text(
+                            'Misty Cliff',
+                            style: TextStyle(
+                              fontSize: 21,
+                              fontWeight: FontWeight.w900,
+                              color: Color(0xFF70465A),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    _AnimatedSettingsButton(
+                      onTap: () {
+                        showDialog(
+                          context: context,
+                          builder: (_) => const _SettingsDialog(),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            // Bottom "Level N" button
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 16,
+              child: Center(
+                child: _PillButton(
+                  label: 'Level $_unlockedLevel',
+                  icon: Icons.play_arrow_rounded,
+                  onTap: () => _showLevelPreview(_unlockedLevel),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
-// ================================================================
-// LEVEL TILE
-// ================================================================
-
 class _LevelTile extends StatelessWidget {
-  final double screenWidth;
-  final double? topXFraction;
-  final double bottomXFraction;
   final int level;
   final bool unlocked;
   final bool current;
@@ -457,9 +390,6 @@ class _LevelTile extends StatelessWidget {
   final VoidCallback onTap;
 
   const _LevelTile({
-    required this.screenWidth,
-    required this.topXFraction,
-    required this.bottomXFraction,
     required this.level,
     required this.unlocked,
     required this.current,
@@ -469,94 +399,134 @@ class _LevelTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Positioned.fill(
-            child: CustomPaint(
-              painter: _PathSegmentPainter(
-                topXFraction: topXFraction,
-                bottomXFraction: bottomXFraction,
+    // The road is painted by ONE painter behind the list (_RoadPainter),
+    // using the same width and the same x-pattern as this node.
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final double w = constraints.maxWidth;
+        return SizedBox(
+          width: w,
+          height: _LevelSelectScreenState._nodeSpacing,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned(
+                left: _LevelSelectScreenState._xFor(level - 1) * w - 52,
+                top: _LevelSelectScreenState._nodeTop,
+                width: 104,
+                child: _LevelNode(
+                  number: level,
+                  unlocked: unlocked,
+                  current: current,
+                  stars: stars,
+                  onTap: onTap,
+                ),
               ),
-            ),
+            ],
           ),
-          Positioned(
-            left: bottomXFraction * screenWidth,
-            bottom: 0,
-            child: FractionalTranslation(
-              translation: const Offset(-0.5, 0),
-              child: _LevelNode(
-                number: level,
-                unlocked: unlocked,
-                current: current,
-                stars: stars,
-                onTap: onTap,
-              ),
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
 
-// ================================================================
-// PATH SEGMENT PAINTER (per tile)
-// ================================================================
+/// Paints the whole visible road as ONE continuous ribbon.
+/// Because it is a single path, there are no seams or stripes.
+class _RoadPainter extends CustomPainter {
+  final ScrollController controller;
 
-class _PathSegmentPainter extends CustomPainter {
-  final double? topXFraction;
-  final double bottomXFraction;
+  _RoadPainter(this.controller) : super(repaint: controller);
 
-  _PathSegmentPainter({
-    required this.topXFraction,
-    required this.bottomXFraction,
-  });
+  static const double _topPad = 105;
+  static const double _spacing = _LevelSelectScreenState._nodeSpacing;
+  static const double _cy = _LevelSelectScreenState._nodeCenterY;
+  static const int _total = _LevelSelectScreenState._totalLevels;
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (topXFraction == null) return;
+    final double offset = controller.hasClients ? controller.offset : 0;
 
-    final Offset top = Offset(topXFraction! * size.width, 0);
-    final Offset bottom = Offset(bottomXFraction * size.width, size.height);
-    final double midY = size.height * 0.5;
+    final int firstList =
+        ((offset - _topPad - 300) / _spacing).floor().clamp(0, _total - 1);
+    final int lastList = ((offset - _topPad + size.height + 300) / _spacing)
+        .ceil()
+        .clamp(0, _total - 1);
 
-    final Offset c0 = Offset(top.dx + (bottom.dx - top.dx) * 0.25, midY);
+    // listIndex -> level index (0-based). Bigger listIndex = lower level.
+    final int lowIdx = _total - 1 - lastList;
+    final int highIdx = _total - 1 - firstList;
+    if (highIdx <= lowIdx) return;
 
-    final Offset c1 = Offset(top.dx + (bottom.dx - top.dx) * 0.75, midY);
+    Offset pt(int idx) {
+      final int listIndex = _total - 1 - idx;
+      return Offset(
+        _LevelSelectScreenState._xFor(idx) * size.width,
+        _topPad + listIndex * _spacing - offset + _cy,
+      );
+    }
 
-    final path = Path()
-      ..moveTo(top.dx, top.dy)
-      ..cubicTo(c0.dx, c0.dy, c1.dx, c1.dy, bottom.dx, bottom.dy);
+    final Path path = Path();
+    final Offset start = pt(lowIdx);
+    path.moveTo(start.dx, start.dy);
 
-    final borderPaint = Paint()
-      ..color = const Color(0xFFB08F63)
-      ..strokeWidth = 28
+    for (int i = lowIdx; i < highIdx; i++) {
+      final Offset low = pt(i);
+      final Offset top = pt(i + 1);
+
+      final double lowT = _LevelSelectScreenState._tangentDx(i);
+      final double topT = _LevelSelectScreenState._tangentDx(i + 1);
+      final double dx = (top.dx - low.dx).abs();
+
+      final Offset tLow = lowT != 0 ? Offset(lowT, 0) : const Offset(0, -1);
+      final Offset tTop = topT != 0 ? Offset(topT, 0) : const Offset(0, -1);
+
+      final double lenLow = lowT != 0 ? dx * 1.0 : _spacing * 0.62;
+      final double lenTop = topT != 0 ? dx * 1.0 : _spacing * 0.62;
+
+      final Offset c1 = low + tLow * lenLow;
+      final Offset c2 = top - tTop * lenTop;
+
+      path.cubicTo(c1.dx, c1.dy, c2.dx, c2.dy, top.dx, top.dy);
+    }
+
+    Paint stroke(double w) => Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = w
       ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke;
+      ..strokeJoin = StrokeJoin.round;
 
-    final paint = Paint()
-      ..color = const Color(0xFFC9A97E)
-      ..strokeWidth = 24
-      ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke;
+    // Soft drop shadow under the ribbon
+    canvas.drawPath(
+      path.shift(const Offset(0, 5)),
+      stroke(60)
+        ..color = const Color(0x33B5588F)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10),
+    );
 
-    canvas.drawPath(path, borderPaint);
-    canvas.drawPath(path, paint);
+    // Pale outer rim
+    canvas.drawPath(path, stroke(58)..color = const Color(0xFFFFF8FB));
+
+    // Main ribbon (pink -> lavender glass feel)
+    canvas.drawPath(
+      path,
+      stroke(48)
+        ..shader = const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFFF2C3E3), Color(0xFFE3C6F2), Color(0xFFF2C3E3)],
+        ).createShader(Offset.zero & size),
+    );
+
+    // Lighter inner lane
+    canvas.drawPath(path, stroke(28)..color = const Color(0x55FFFFFF));
+
+    // Thin glossy highlight
+    canvas.drawPath(path, stroke(3)..color = const Color(0xAAFFFFFF));
   }
 
   @override
-  bool shouldRepaint(covariant _PathSegmentPainter oldDelegate) {
-    return oldDelegate.topXFraction != topXFraction ||
-        oldDelegate.bottomXFraction != bottomXFraction;
-  }
+  bool shouldRepaint(covariant _RoadPainter old) => old.controller != controller;
 }
-
-// ================================================================
-// LEVEL NODE
-// ================================================================
 
 class _LevelNode extends StatelessWidget {
   final int number;
@@ -575,132 +545,127 @@ class _LevelNode extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    late final List<Color> ballColors;
-    late final Color rimColor;
-    Color glow = Colors.transparent;
+    final List<Color> sphereColors = current
+        ? const [Color(0xFFFFB3D1), Color(0xFFE0388C)]
+        : unlocked
+        ? const [Color(0xFFD9C2F5), Color(0xFF9272CC)]
+        : const [Color(0xFFDDD0EA), Color(0xFFB2A2C6)];
 
-    if (current) {
-      ballColors = const [Color(0xFFFF9BC4), Color(0xFFE0388C)];
-      rimColor = const Color(0xFFFFE8F3);
-      glow = const Color(0xFFFF6FAE).withValues(alpha: 0.55);
-    } else if (unlocked) {
-      ballColors = const [Color(0xFF6FD3FF), Color(0xFF1E5FC2)];
-      rimColor = const Color(0xFFE7F8FF);
-    } else {
-      ballColors = const [Color(0xFF808C99), Color(0xFF3F4852)];
-      rimColor = const Color(0xFFD9DEE3);
-    }
+    return SizedBox(
+      width: 104,
+      height: 110,
+      child: Stack(
+        clipBehavior: Clip.none,
+        alignment: Alignment.topCenter,
+        children: [
+          if (current) const Positioned(top: -40, child: _BounceArrow()),
 
-    return GestureDetector(
-      onTap: unlocked ? onTap : null,
-      child: SizedBox(
-        width: 70,
-        height: 132,
-        child: Stack(
-          clipBehavior: Clip.none,
-          alignment: Alignment.bottomCenter,
-          children: [
-            const Positioned(bottom: 0, child: _Pedestal()),
-            Positioned(
-              bottom: 8,
+          // White pedestal behind the sphere
+          const Positioned(top: 46, child: _Pedestal()),
+
+          // Glossy sphere
+          Positioned(
+            top: 0,
+            child: GestureDetector(
+              onTap: unlocked ? onTap : null,
               child: Container(
-                width: 64,
-                height: 64,
+                width: 70,
+                height: 70,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   gradient: RadialGradient(
-                    center: const Alignment(-0.35, -0.45),
+                    center: const Alignment(-0.4, -0.45),
                     radius: 0.95,
-                    colors: [
-                      Colors.white.withValues(alpha: 0.55),
-                      ballColors.first,
-                      ballColors.last,
-                    ],
-                    stops: const [0.0, 0.35, 1.0],
+                    colors: sphereColors,
                   ),
                   border: Border.all(
-                    color: rimColor.withValues(alpha: 0.85),
-                    width: 2.5,
+                    color: Colors.white.withValues(alpha: 0.85),
+                    width: 3,
                   ),
                   boxShadow: [
-                    if (current)
-                      BoxShadow(color: glow, blurRadius: 22, spreadRadius: 4),
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.35),
-                      blurRadius: 8,
-                      offset: const Offset(0, 4),
+                      color:
+                          (current
+                                  ? const Color(0xFFFF6FAE)
+                                  : const Color(0xFF7B5BB5))
+                              .withValues(alpha: current ? 0.45 : 0.28),
+                      blurRadius: current ? 20 : 12,
+                      offset: const Offset(0, 6),
                     ),
                   ],
                 ),
-                child: Center(
-                  child: Text(
-                    '$number',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w900,
-                      fontSize: 22,
-                      shadows: [
-                        Shadow(
-                          color: Colors.black54,
-                          blurRadius: 3,
-                          offset: Offset(0, 1),
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    // Glass highlight
+                    Positioned(
+                      top: 7,
+                      left: 13,
+                      child: Container(
+                        width: 26,
+                        height: 13,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(20),
+                          color: Colors.white.withValues(alpha: 0.4),
                         ),
-                      ],
+                      ),
                     ),
-                  ),
+                    Text(
+                      '$number',
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.white.withValues(
+                          alpha: unlocked ? 1 : 0.8,
+                        ),
+                        shadows: const [
+                          Shadow(
+                            color: Color(0x66000000),
+                            blurRadius: 4,
+                            offset: Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
-            if (stars > 0)
-              Positioned(
-                bottom: -14,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: List.generate(3, (i) {
-                    final bool filled = i < stars;
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 1.5),
-                      child: Icon(
-                        Icons.star_rounded,
-                        size: 20,
-                        color: filled
-                            ? const Color(0xFFFFD23F)
-                            : Colors.white30,
-                        shadows: filled
-                            ? const [
-                                Shadow(
-                                  color: Colors.black54,
-                                  blurRadius: 4,
-                                  offset: Offset(0, 1),
-                                ),
-                                Shadow(
-                                  color: Color(0xFFFFF3B0),
-                                  blurRadius: 10,
-                                ),
-                              ]
-                            : const [
-                                Shadow(
-                                  color: Colors.black45,
-                                  blurRadius: 3,
-                                  offset: Offset(0, 1),
-                                ),
-                              ],
-                      ),
-                    );
-                  }),
-                ),
+          ),
+
+          // Stars arc under the sphere (only after earning some)
+          if (stars > 0)
+            Positioned(
+              top: 66,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: List.generate(3, (i) {
+                  final bool earned = i < stars;
+                  return Transform.translate(
+                    offset: Offset(0, i == 1 ? 5 : 0),
+                    child: Icon(
+                      Icons.star_rounded,
+                      size: 21,
+                      color: earned
+                          ? const Color(0xFFFFC43D)
+                          : Colors.white.withValues(alpha: 0.6),
+                      shadows: const [
+                        Shadow(
+                          color: Color(0x55B56B00),
+                          blurRadius: 3,
+                          offset: Offset(0, 1.5),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
               ),
-            if (current) const Positioned(bottom: 88, child: _BounceArrow()),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
 }
-
-// ================================================================
-// PEDESTAL
-// ================================================================
 
 class _Pedestal extends StatelessWidget {
   const _Pedestal();
@@ -708,19 +673,27 @@ class _Pedestal extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 46,
-      height: 12,
+      width: 82,
+      height: 30,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        color: Colors.white.withValues(alpha: 0.20),
+        borderRadius: const BorderRadius.all(Radius.elliptical(41, 15)),
+        gradient: const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Colors.white, Color(0xFFEBDDF0)],
+        ),
+        border: Border.all(color: Colors.white, width: 2),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF8A5C9E).withValues(alpha: 0.25),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
     );
   }
 }
-
-// ================================================================
-// BOUNCE ARROW
-// ================================================================
 
 class _BounceArrow extends StatefulWidget {
   const _BounceArrow();
@@ -731,15 +704,17 @@ class _BounceArrow extends StatefulWidget {
 
 class _BounceArrowState extends State<_BounceArrow>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 700),
-  )..repeat(reverse: true);
+  late final AnimationController _controller;
 
-  late final Animation<double> _offset = Tween<double>(
-    begin: 0,
-    end: 8,
-  ).chain(CurveTween(curve: Curves.easeInOut)).animate(_controller);
+  @override
+  void initState() {
+    super.initState();
+
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 700),
+    )..repeat(reverse: true);
+  }
 
   @override
   void dispose() {
@@ -750,31 +725,31 @@ class _BounceArrowState extends State<_BounceArrow>
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: _offset,
-      builder: (context, child) {
-        return Transform.translate(
-          offset: Offset(0, _offset.value),
-          child: child,
-        );
+      animation: _controller,
+      builder: (_, child) {
+        final double offset = Tween<double>(
+          begin: 0,
+          end: 8,
+        ).evaluate(_controller);
+
+        return Transform.translate(offset: Offset(0, offset), child: child);
       },
-      child: const Padding(
-        padding: EdgeInsets.only(bottom: 4),
-        child: Icon(
-          Icons.arrow_downward_rounded,
-          color: Color(0xFFFF6FAE),
-          size: 30,
-          shadows: [
-            Shadow(color: Colors.black45, blurRadius: 4, offset: Offset(0, 2)),
-          ],
-        ),
+      child: const Icon(
+        Icons.arrow_downward_rounded,
+        size: 36,
+        color: Color(0xFFF06BAA),
+        shadows: [
+          Shadow(color: Colors.white, blurRadius: 8),
+          Shadow(
+            color: Color(0x55E0388C),
+            blurRadius: 10,
+            offset: Offset(0, 3),
+          ),
+        ],
       ),
     );
   }
 }
-
-// ================================================================
-// ANIMATED SETTINGS BUTTON
-// ================================================================
 
 class _AnimatedSettingsButton extends StatefulWidget {
   final VoidCallback onTap;
@@ -788,15 +763,17 @@ class _AnimatedSettingsButton extends StatefulWidget {
 
 class _AnimatedSettingsButtonState extends State<_AnimatedSettingsButton>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1200),
-  )..repeat(reverse: true);
+  late final AnimationController _controller;
 
-  late final Animation<double> _scale = Tween<double>(
-    begin: 1.0,
-    end: 1.08,
-  ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+  @override
+  void initState() {
+    super.initState();
+
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat(reverse: true);
+  }
 
   @override
   void dispose() {
@@ -807,9 +784,14 @@ class _AnimatedSettingsButtonState extends State<_AnimatedSettingsButton>
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: _scale,
-      builder: (context, child) {
-        return Transform.scale(scale: _scale.value, child: child);
+      animation: _controller,
+      builder: (_, child) {
+        final double scale = Tween<double>(
+          begin: 1,
+          end: 1.08,
+        ).evaluate(_controller);
+
+        return Transform.scale(scale: scale, child: child);
       },
       child: _RoundIconButton(
         icon: Icons.settings_rounded,
@@ -819,132 +801,155 @@ class _AnimatedSettingsButtonState extends State<_AnimatedSettingsButton>
   }
 }
 
-// ================================================================
-// SETTINGS DIALOG
-// ================================================================
-
-class _SettingsDialog extends StatefulWidget {
+class _SettingsDialog extends StatelessWidget {
   const _SettingsDialog();
-
-  @override
-  State<_SettingsDialog> createState() => _SettingsDialogState();
-}
-
-class _SettingsDialogState extends State<_SettingsDialog> {
-  bool _musicOn = true;
-  bool _soundOn = true;
-  bool _vibrateOn = true;
 
   @override
   Widget build(BuildContext context) {
     return Dialog(
       backgroundColor: Colors.transparent,
       insetPadding: const EdgeInsets.symmetric(horizontal: 28),
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Container(
-            padding: const EdgeInsets.fromLTRB(20, 28, 20, 24),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Color(0xFFFFDCEA), Color(0xFFFFC2DC)],
-              ),
-              borderRadius: BorderRadius.circular(28),
-              border: Border.all(color: Colors.white, width: 3),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.25),
-                  blurRadius: 20,
-                  offset: const Offset(0, 10),
-                ),
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  'Settings',
-                  style: TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.w900,
-                    color: Color(0xFF7A4A3A),
-                    shadows: [Shadow(color: Colors.white, blurRadius: 4)],
-                  ),
-                ),
-                const SizedBox(height: 20),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 14,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.45),
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  child: Column(
-                    children: [
-                      _SettingsRow(
-                        icon: Icons.music_note_rounded,
-                        label: 'Music',
-                        value: _musicOn,
-                        onChanged: (v) => setState(() => _musicOn = v),
-                      ),
-                      const SizedBox(height: 14),
-                      _SettingsRow(
-                        icon: Icons.volume_up_rounded,
-                        label: 'Sound',
-                        value: _soundOn,
-                        onChanged: (v) => setState(() => _soundOn = v),
-                      ),
-                      const SizedBox(height: 14),
-                      _SettingsRow(
-                        icon: Icons.vibration_rounded,
-                        label: 'Vibrate',
-                        value: _vibrateOn,
-                        onChanged: (v) => setState(() => _vibrateOn = v),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 22),
-                _PillButton(
-                  label: 'Rate Us',
-                  icon: Icons.star_rounded,
-                  colors: const [Color(0xFFFFD97A), Color(0xFFF2A93B)],
-                  onTap: () {
-                    // TODO: hook up to your store listing / in_app_review package.
-                    Navigator.of(context).pop();
-                  },
-                ),
-              ],
-            ),
+      child: Container(
+        padding: const EdgeInsets.all(22),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFFFFE8F2), Color(0xFFF6CFDF)],
           ),
-          Positioned(
-            top: -14,
-            right: -8,
-            child: GestureDetector(
-              onTap: () => Navigator.of(context).pop(),
+          borderRadius: BorderRadius.circular(30),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.9),
+            width: 2,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFFB56B8D).withValues(alpha: 0.25),
+              blurRadius: 30,
+              offset: const Offset(0, 15),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Settings',
+              style: TextStyle(
+                fontSize: 25,
+                fontWeight: FontWeight.w900,
+                color: Color(0xFF70465A),
+              ),
+            ),
+            const SizedBox(height: 18),
+            const _SettingsRow(icon: Icons.music_note_rounded, label: 'Music'),
+            const SizedBox(height: 10),
+            const _SettingsRow(icon: Icons.volume_up_rounded, label: 'Sound'),
+            const SizedBox(height: 10),
+            const _SettingsRow(icon: Icons.vibration_rounded, label: 'Vibrate'),
+            const SizedBox(height: 18),
+            _PillButton(
+              label: 'RATE US',
+              icon: Icons.star_rounded,
+              onTap: () {
+                Navigator.pop(context);
+              },
+            ),
+            const SizedBox(height: 12),
+            GestureDetector(
+              onTap: () => Navigator.pop(context),
               child: Container(
                 width: 44,
                 height: 44,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: const Color(0xFFE0554C),
-                  border: Border.all(color: Colors.white, width: 3),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.25),
-                      blurRadius: 8,
-                      offset: const Offset(0, 3),
-                    ),
-                  ],
+                  color: Colors.white.withValues(alpha: 0.55),
                 ),
                 child: const Icon(
                   Icons.close_rounded,
-                  color: Colors.white,
-                  size: 24,
+                  color: Color(0xFF70465A),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsRow extends StatefulWidget {
+  final IconData icon;
+  final String label;
+
+  const _SettingsRow({required this.icon, required this.label});
+
+  @override
+  State<_SettingsRow> createState() => _SettingsRowState();
+}
+
+class _SettingsRowState extends State<_SettingsRow> {
+  bool enabled = true;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.white.withValues(alpha: 0.65),
+            ),
+            child: Icon(widget.icon, size: 20, color: const Color(0xFF9A607A)),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              widget.label,
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF70465A),
+              ),
+            ),
+          ),
+          GestureDetector(
+            onTap: () {
+              setState(() {
+                enabled = !enabled;
+              });
+            },
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              width: 52,
+              height: 29,
+              padding: const EdgeInsets.all(3),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(30),
+                color: enabled
+                    ? const Color(0xFFE0388C)
+                    : const Color(0xFFB5B5B5),
+              ),
+              child: AnimatedAlign(
+                duration: const Duration(milliseconds: 220),
+                alignment: enabled
+                    ? Alignment.centerRight
+                    : Alignment.centerLeft,
+                child: Container(
+                  width: 23,
+                  height: 23,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white,
+                  ),
                 ),
               ),
             ),
@@ -955,146 +960,15 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   }
 }
 
-// ================================================================
-// SETTINGS ROW (icon + label + toggle)
-// ================================================================
-
-class _SettingsRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final bool value;
-  final ValueChanged<bool> onChanged;
-
-  const _SettingsRow({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFFFFE7D6), Color(0xFFFFC79B)],
-            ),
-            border: Border.all(color: Colors.white, width: 2),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.12),
-                blurRadius: 4,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Icon(icon, color: const Color(0xFF7A4A3A), size: 22),
-        ),
-        const SizedBox(width: 14),
-        Expanded(
-          child: Text(
-            label,
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w900,
-              color: Color(0xFF7A4A3A),
-              letterSpacing: 0.3,
-            ),
-          ),
-        ),
-        GestureDetector(
-          onTap: () => onChanged(!value),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            curve: Curves.easeOut,
-            width: 68,
-            height: 34,
-            padding: const EdgeInsets.all(3),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(20),
-              gradient: LinearGradient(
-                colors: value
-                    ? const [Color(0xFFFFD97A), Color(0xFFF2A93B)]
-                    : const [Color(0xFFBFA093), Color(0xFF9C7C6E)],
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.15),
-                  blurRadius: 4,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                AnimatedAlign(
-                  duration: const Duration(milliseconds: 180),
-                  curve: Curves.easeOut,
-                  alignment: value
-                      ? Alignment.centerLeft
-                      : Alignment.centerRight,
-                  child: Padding(
-                    padding: EdgeInsets.only(
-                      left: value ? 6 : 0,
-                      right: value ? 0 : 6,
-                    ),
-                    child: Text(
-                      value ? 'On' : 'Off',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 11,
-                      ),
-                    ),
-                  ),
-                ),
-                AnimatedAlign(
-                  duration: const Duration(milliseconds: 180),
-                  curve: Curves.easeOut,
-                  alignment: value
-                      ? Alignment.centerRight
-                      : Alignment.centerLeft,
-                  child: Container(
-                    width: 26,
-                    height: 26,
-                    decoration: const BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ================================================================
-// PILL BUTTON
-// ================================================================
-
 class _PillButton extends StatefulWidget {
   final String label;
-  final List<Color> colors;
-  final IconData? icon;
+  final IconData icon;
   final VoidCallback onTap;
 
   const _PillButton({
     required this.label,
-    required this.colors,
+    required this.icon,
     required this.onTap,
-    this.icon,
   });
 
   @override
@@ -1103,25 +977,26 @@ class _PillButton extends StatefulWidget {
 
 class _PillButtonState extends State<_PillButton>
     with TickerProviderStateMixin {
-  late final AnimationController _pressController = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 350),
-  );
+  late final AnimationController _pressController;
+  late final AnimationController _pulseController;
 
-  late final Animation<double> _pressScale = Tween<double>(
-    begin: 1,
-    end: 0.92,
-  ).chain(CurveTween(curve: Curves.easeOut)).animate(_pressController);
+  @override
+  void initState() {
+    super.initState();
 
-  late final AnimationController _pulseController = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 900),
-  )..repeat(reverse: true);
+    _pressController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 350),
+      lowerBound: 0.92,
+      upperBound: 1.0,
+      value: 1.0,
+    );
 
-  late final Animation<double> _pulseScale = Tween<double>(
-    begin: 1.0,
-    end: 1.06,
-  ).chain(CurveTween(curve: Curves.easeInOut)).animate(_pulseController);
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
+  }
 
   @override
   void dispose() {
@@ -1130,61 +1005,63 @@ class _PillButtonState extends State<_PillButton>
     super.dispose();
   }
 
-  void _onTapDown(TapDownDetails _) => _pressController.forward();
-
-  void _onTapUp(TapUpDetails _) {
-    _pressController.reverse().then((_) {
-      _pressController.forward(from: 0).then((_) => _pressController.reverse());
-    });
-    widget.onTap();
-  }
-
-  void _onTapCancel() => _pressController.reverse();
-
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTapDown: _onTapDown,
-      onTapUp: _onTapUp,
-      onTapCancel: _onTapCancel,
+      onTapDown: (_) {
+        _pressController.reverse();
+      },
+      onTapUp: (_) {
+        _pressController.forward();
+        widget.onTap();
+      },
+      onTapCancel: () {
+        _pressController.forward();
+      },
       child: AnimatedBuilder(
-        animation: Listenable.merge([_pressScale, _pulseScale]),
-        builder: (context, child) {
+        animation: Listenable.merge([_pressController, _pulseController]),
+        builder: (_, child) {
+          final double pulse = Tween<double>(
+            begin: 1,
+            end: 1.06,
+          ).evaluate(_pulseController);
+
           return Transform.scale(
-            scale: _pressScale.value * _pulseScale.value,
+            scale: pulse * _pressController.value,
             child: child,
           );
         },
         child: Container(
-          width: double.infinity,
-          height: 56,
-          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 13),
           decoration: BoxDecoration(
-            gradient: LinearGradient(colors: widget.colors),
-            borderRadius: BorderRadius.circular(28),
-            border: Border.all(color: Colors.white, width: 2.5),
+            gradient: const LinearGradient(
+              colors: [Color(0xFFFF9BC4), Color(0xFFE0388C)],
+            ),
+            borderRadius: BorderRadius.circular(30),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.8),
+              width: 2,
+            ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.22),
-                blurRadius: 8,
-                offset: const Offset(0, 4),
+                color: const Color(0xFFE0388C).withValues(alpha: 0.3),
+                blurRadius: 14,
+                offset: const Offset(0, 6),
               ),
             ],
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (widget.icon != null) ...[
-                Icon(widget.icon, color: Colors.white, size: 22),
-                const SizedBox(width: 8),
-              ],
+              Icon(widget.icon, color: Colors.white, size: 20),
+              const SizedBox(width: 7),
               Text(
                 widget.label,
                 style: const TextStyle(
                   color: Colors.white,
-                  fontSize: 20,
+                  fontSize: 14,
                   fontWeight: FontWeight.w900,
-                  letterSpacing: 0.4,
+                  letterSpacing: 1,
                 ),
               ),
             ],
@@ -1195,10 +1072,6 @@ class _PillButtonState extends State<_PillButton>
   }
 }
 
-// ================================================================
-// ROUND ICON BUTTON
-// ================================================================
-
 class _RoundIconButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
@@ -1208,15 +1081,88 @@ class _RoundIconButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.white.withValues(alpha: 0.55),
+      color: Colors.transparent,
       shape: const CircleBorder(),
       child: InkWell(
-        customBorder: const CircleBorder(),
         onTap: onTap,
-        child: Padding(
+        customBorder: const CircleBorder(),
+        child: Container(
+          width: 44,
+          height: 44,
           padding: const EdgeInsets.all(10),
-          child: Icon(icon, size: 20, color: const Color(0xFF7A4A3A)),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: Colors.white.withValues(alpha: 0.5),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.7),
+              width: 1.5,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 8,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Icon(icon, size: 20, color: const Color(0xFF70465A)),
         ),
+      ),
+    );
+  }
+}
+
+class _InfoBox extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String value;
+
+  const _InfoBox({
+    required this.icon,
+    required this.title,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.42),
+        borderRadius: BorderRadius.circular(17),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.65)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 19, color: const Color(0xFFB15F83)),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF9A607A),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF70465A),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
