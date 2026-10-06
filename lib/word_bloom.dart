@@ -505,12 +505,11 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                         confettiController: _confettiController,
                         score: _engine.score,
                         stars: _engine.starsEarned,
-                        collectedLetters: _engine.collectedLetters,
+                        completedWords: _engine.completedWords,
                         letterColors: _engine.letterColors,
                         onPressed: _goNext,
                       ),
                     ),
-
                   // FIRST-SHOT TUTORIAL
                   if (_showTutorial)
                     Positioned.fill(
@@ -1259,10 +1258,7 @@ class _BonusShotPainter extends CustomPainter {
               fontSize: r * 0.8,
               fontWeight: FontWeight.w900,
               shadows: [
-                Shadow(
-                  color: s.color.withValues(alpha: 1 - t),
-                  blurRadius: 8,
-                ),
+                Shadow(color: s.color.withValues(alpha: 1 - t), blurRadius: 8),
                 Shadow(
                   color: Colors.black.withValues(alpha: 0.35 * (1 - t)),
                   blurRadius: 3,
@@ -1588,9 +1584,21 @@ class _GameBoardPainter extends CustomPainter {
           ..strokeWidth = radius * 0.07
           ..strokeCap = StrokeCap.round;
         final Offset mid = center.translate(radius * 0.12, -radius * 0.05);
-        canvas.drawLine(center.translate(-radius * 0.10, -radius * 0.55), mid, crack);
-        canvas.drawLine(mid, center.translate(-radius * 0.20, radius * 0.45), crack);
-        canvas.drawLine(mid, center.translate(radius * 0.50, radius * 0.20), crack);
+        canvas.drawLine(
+          center.translate(-radius * 0.10, -radius * 0.55),
+          mid,
+          crack,
+        );
+        canvas.drawLine(
+          mid,
+          center.translate(-radius * 0.20, radius * 0.45),
+          crack,
+        );
+        canvas.drawLine(
+          mid,
+          center.translate(radius * 0.50, radius * 0.20),
+          crack,
+        );
 
         canvas.drawOval(
           Rect.fromCenter(
@@ -1722,8 +1730,9 @@ class _GameBoardPainter extends CustomPainter {
           center,
           radius,
           Paint()
-            ..color = const Color(0xFF3A3F55)
-                .withValues(alpha: damaged ? 0.20 : 0.30),
+            ..color = const Color(
+              0xFF3A3F55,
+            ).withValues(alpha: damaged ? 0.20 : 0.30),
         );
 
         // chain links around the edge
@@ -1735,8 +1744,7 @@ class _GameBoardPainter extends CustomPainter {
           if (damaged && missing.contains(k)) continue;
 
           final double a = (2 * pi * k / linkCount) - pi / 2;
-          final Offset p =
-              center.translate(cos(a) * chainR, sin(a) * chainR);
+          final Offset p = center.translate(cos(a) * chainR, sin(a) * chainR);
 
           canvas.save();
           canvas.translate(p.dx, p.dy);
@@ -2559,11 +2567,11 @@ class _GameOverOverlay extends StatelessWidget {
 // LEVEL COMPLETE OVERLAY
 // ================================================================
 
-class _LevelCompleteOverlay extends StatelessWidget {
+class _LevelCompleteOverlay extends StatefulWidget {
   final ConfettiController confettiController;
   final int score;
   final int stars;
-  final List<String> collectedLetters;
+  final List<String> completedWords;
   final Map<String, Color> letterColors;
   final VoidCallback onPressed;
 
@@ -2571,111 +2579,286 @@ class _LevelCompleteOverlay extends StatelessWidget {
     required this.confettiController,
     required this.score,
     required this.stars,
-    required this.collectedLetters,
+    required this.completedWords,
     required this.letterColors,
     required this.onPressed,
   });
 
   @override
+  State<_LevelCompleteOverlay> createState() => _LevelCompleteOverlayState();
+}
+
+class _LevelCompleteOverlayState extends State<_LevelCompleteOverlay>
+    with TickerProviderStateMixin {
+  late final AnimationController _cardController;
+  late final AnimationController _floatController;
+  late final AnimationController _buttonController;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _cardController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 650),
+    )..forward();
+
+    _floatController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2200),
+    )..repeat(reverse: true);
+
+    _buttonController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1700),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _cardController.dispose();
+    _floatController.dispose();
+    _buttonController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final Size screen = MediaQuery.sizeOf(context);
+
     return Container(
-      color: Colors.black.withValues(alpha: 0.40),
+      color: Colors.black.withValues(alpha: 0.48),
       child: Stack(
-        alignment: Alignment.center,
         children: [
-          Align(
-            alignment: Alignment.topCenter,
-            child: ConfettiWidget(
-              confettiController: confettiController,
-              blastDirectionality: BlastDirectionality.explosive,
-              shouldLoop: false,
-              numberOfParticles: 26,
-              gravity: 0.25,
-              colors: const [
-                Color(0xFFFF6FAE),
-                Color(0xFFFFD15C),
-                Color(0xFF63D6B0),
-                Color(0xFF5DABFF),
-                Color(0xFFC08BFF),
-              ],
+          // ==========================================================
+          // CONFETTI
+          // ==========================================================
+
+          Positioned.fill(
+            child: IgnorePointer(
+              child: ConfettiWidget(
+                confettiController: widget.confettiController,
+                blastDirectionality: BlastDirectionality.explosive,
+                shouldLoop: false,
+                numberOfParticles: 34,
+                gravity: 0.22,
+                emissionFrequency: 0.04,
+                colors: const [
+                  Color(0xFFFF6FAE),
+                  Color(0xFFFFC857),
+                  Color(0xFF63D6B0),
+                  Color(0xFF5DABFF),
+                  Color(0xFFC08BFF),
+                ],
+              ),
             ),
           ),
-          Container(
-            margin: const EdgeInsets.symmetric(horizontal: 28),
-            padding: const EdgeInsets.all(28),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFFFDF9),
-              borderRadius: BorderRadius.circular(30),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.16),
-                  blurRadius: 30,
-                  offset: const Offset(0, 12),
+
+          // ==========================================================
+          // MAIN CARD
+          // ==========================================================
+          Center(
+            child: AnimatedBuilder(
+              animation: _cardController,
+              builder: (context, child) {
+                final double t = Curves.easeOutBack.transform(
+                  _cardController.value,
+                );
+
+                return Opacity(
+                  opacity: _cardController.value.clamp(0.0, 1.0),
+                  child: Transform.scale(
+                    scale: 0.88 + (0.12 * t),
+                    child: child,
+                  ),
+                );
+              },
+              child: Container(
+                constraints: BoxConstraints(maxWidth: 430),
+
+                margin: const EdgeInsets.symmetric(horizontal: 20),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF8FC),
+                  borderRadius: BorderRadius.circular(28),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.9),
+                    width: 1.5,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF5D3B4A).withValues(alpha: 0.20),
+                      blurRadius: 42,
+                      spreadRadius: 2,
+                      offset: const Offset(0, 18),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text('🌸', style: TextStyle(fontSize: 44)),
-                const SizedBox(height: 4),
-                const Text(
-                  'LEVEL COMPLETE!',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w900,
-                    color: Color(0xFF292929),
-                    letterSpacing: 1,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(28),
+                  child: Stack(
+                    children: [
+                      // ==================================================
+                      // SOFT BACKGROUND GLOW
+                      // ==================================================
+
+                      Positioned(
+                        top: -70,
+                        right: -55,
+                        child: Container(
+                          width: 180,
+                          height: 180,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: const Color(
+                              0xFFFFA9CD,
+                            ).withValues(alpha: 0.16),
+                          ),
+                        ),
+                      ),
+
+                      Positioned(
+                        bottom: -70,
+                        left: -60,
+                        child: Container(
+                          width: 190,
+                          height: 190,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: const Color(
+                              0xFFFFD76A,
+                            ).withValues(alpha: 0.10),
+                          ),
+                        ),
+                      ),
+
+                      // ==================================================
+                      // DECORATIVE PETALS
+                      // ==================================================
+                      AnimatedBuilder(
+                        animation: _floatController,
+                        builder: (context, child) {
+                          final double t = Curves.easeInOut.transform(
+                            _floatController.value,
+                          );
+
+                          return Stack(
+                            children: [
+                              Positioned(
+                                top: 24 + (t * 7),
+                                left: 25,
+                                child: Transform.rotate(
+                                  angle: -0.25 + (t * 0.15),
+                                  child: const _FloatingPetal(
+                                    size: 13,
+                                    color: Color(0xFFFFB4D1),
+                                  ),
+                                ),
+                              ),
+                              Positioned(
+                                top: 75 - (t * 8),
+                                right: 25,
+                                child: Transform.rotate(
+                                  angle: 0.35 - (t * 0.18),
+                                  child: const _FloatingPetal(
+                                    size: 10,
+                                    color: Color(0xFFFFD36A),
+                                  ),
+                                ),
+                              ),
+                              Positioned(
+                                top: 135 + (t * 6),
+                                left: 17,
+                                child: Transform.rotate(
+                                  angle: 0.45,
+                                  child: const _FloatingPetal(
+                                    size: 8,
+                                    color: Color(0xFFFFC4DC),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+
+                      // ==================================================
+                      // CONTENT
+                      // ==================================================
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(18, 14, 18, 12),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // ============================================
+                            // BLOOM DECORATION
+                            // ============================================
+
+                            const _CompletionBloom(),
+
+                            const SizedBox(height: 8),
+
+                            // ============================================
+                            // TITLE
+                            // ============================================
+                            const Text(
+                              'LEVEL COMPLETE',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 25,
+                                fontWeight: FontWeight.w900,
+                                color: Color(0xFF3B2932),
+                                letterSpacing: 0.7,
+                                height: 1.0,
+                              ),
+                            ),
+
+                            const SizedBox(height: 10),
+
+                            // ============================================
+                            // SUBTITLE
+                            // ============================================
+
+                            // ============================================
+                            // STARS
+                            // ============================================
+                            _StarRow(stars: widget.stars),
+
+                            const SizedBox(height: 10),
+
+                            // ============================================
+                            // WORDS
+                            // ============================================
+                            _WordsFoundCard(
+                              words: widget.completedWords,
+                              letterColors: widget.letterColors,
+                            ),
+
+                            const SizedBox(height: 9),
+
+                            // ============================================
+                            // SCORE
+                            // ============================================
+                            _ScoreReward(score: widget.score),
+
+                            const SizedBox(height: 10),
+
+                            // ============================================
+                            // NEXT LEVEL
+                            // ============================================
+                            SizedBox(
+                              width: double.infinity,
+                              height: 54,
+                              child: _NextLevelButton(
+                                onPressed: widget.onPressed,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 14),
-                _StarRow(stars: stars),
-                const SizedBox(height: 14),
-                _CollectedLettersReveal(
-                  letters: collectedLetters,
-                  colors: letterColors,
-                ),
-                const SizedBox(height: 10),
-                TweenAnimationBuilder<int>(
-                  tween: IntTween(begin: 0, end: score),
-                  duration: const Duration(milliseconds: 900),
-                  curve: Curves.easeOutCubic,
-                  builder: (context, value, child) {
-                    return Text(
-                      '$value pts',
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w900,
-                        color: Color(0xFFFF4D96),
-                      ),
-                    );
-                  },
-                ),
-                const SizedBox(height: 22),
-                SizedBox(
-                  width: double.infinity,
-                  height: 52,
-                  child: ElevatedButton(
-                    onPressed: onPressed,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF292929),
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                    ),
-                    child: const Text(
-                      'NEXT LEVEL',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 1,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
         ],
@@ -2684,8 +2867,553 @@ class _LevelCompleteOverlay extends StatelessWidget {
   }
 }
 
+// ================================================================
+// FLOATING PETAL
+// ================================================================
+
+class _FloatingPetal extends StatelessWidget {
+  final double size;
+  final Color color;
+
+  const _FloatingPetal({required this.size, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size * 0.65,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.75),
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(size),
+          topRight: Radius.circular(size),
+          bottomLeft: Radius.circular(size * 0.2),
+          bottomRight: Radius.circular(size),
+        ),
+      ),
+    );
+  }
+}
+
+// ================================================================
+// COMPLETION BLOOM
+// ================================================================
+
+class _CompletionBloom extends StatefulWidget {
+  const _CompletionBloom();
+
+  @override
+  State<_CompletionBloom> createState() => _CompletionBloomState();
+}
+
+class _CompletionBloomState extends State<_CompletionBloom>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        final double t = Curves.easeInOut.transform(_controller.value);
+
+        return Transform.translate(
+          offset: Offset(0, -2 * t),
+          child: Transform.scale(
+            scale: 0.96 + (t * 0.04),
+            child: SizedBox(
+              width: 92,
+              height: 70,
+              child: CustomPaint(painter: _BloomPainter(glow: t)),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ================================================================
+// BLOOM PAINTER
+// ================================================================
+
+class _BloomPainter extends CustomPainter {
+  final double glow;
+
+  const _BloomPainter({required this.glow});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final Offset center = Offset(size.width / 2, size.height / 2 + 5);
+
+    final Paint glowPaint = Paint()
+      ..color = const Color(0xFFFF6FAE).withValues(alpha: 0.10 + glow * 0.08)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12);
+
+    canvas.drawCircle(center, 27, glowPaint);
+
+    final Paint petalPaint = Paint()..color = const Color(0xFFFFA9C9);
+
+    final Paint petalLightPaint = Paint()..color = const Color(0xFFFFC4DB);
+
+    final Paint centerPaint = Paint()..color = const Color(0xFFFFC857);
+
+    for (int i = 0; i < 8; i++) {
+      final double angle = (i * pi / 4) - (pi / 2);
+
+      final double x = center.dx + cos(angle) * 23;
+
+      final double y = center.dy + sin(angle) * 23;
+
+      final Paint paint = i.isEven ? petalPaint : petalLightPaint;
+
+      canvas.save();
+      canvas.translate(x, y);
+      canvas.rotate(angle);
+
+      final Path petal = Path()
+        ..moveTo(0, 0)
+        ..quadraticBezierTo(11, -7, 14, 0)
+        ..quadraticBezierTo(11, 8, 0, 0);
+
+      canvas.drawPath(petal, paint);
+      canvas.restore();
+    }
+
+    canvas.drawCircle(center, 11, centerPaint);
+
+    final Paint dotPaint = Paint()..color = const Color(0xFFFFF4CC);
+
+    for (int i = 0; i < 6; i++) {
+      final double angle = i * pi / 3;
+
+      canvas.drawCircle(
+        Offset(center.dx + cos(angle) * 6, center.dy + sin(angle) * 6),
+        1.7,
+        dotPaint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _BloomPainter oldDelegate) {
+    return oldDelegate.glow != glow;
+  }
+}
+
+// ================================================================
+// WORDS FOUND CARD
+// ================================================================
+
+// ================================================================
+// WORDS FOUND
+// ================================================================
+
+class _WordsFoundCard extends StatelessWidget {
+  final List<String> words;
+  final Map<String, Color> letterColors;
+
+  const _WordsFoundCard({required this.words, required this.letterColors});
+
+  @override
+  Widget build(BuildContext context) {
+    if (words.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(13, 11, 13, 12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.72),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFFFD5E6), width: 1),
+      ),
+      child: Column(
+        children: [
+          // --------------------------------------------------------
+          // HEADER
+          // --------------------------------------------------------
+
+          Row(
+            children: [
+              const Icon(
+                Icons.auto_awesome_rounded,
+                size: 18,
+                color: Color(0xFFFF4D96),
+              ),
+
+              const SizedBox(width: 7),
+
+              const Text(
+                'WORDS FOUND',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                  color: Color(0xFF6E4C5B),
+                  letterSpacing: 1.35,
+                ),
+              ),
+
+              const Spacer(),
+
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFEEF5),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Text(
+                  '${words.length}',
+                  style: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                    color: Color(0xFFFF4D96),
+                  ),
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 9),
+
+          // --------------------------------------------------------
+          // WORD CHIPS
+          // --------------------------------------------------------
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 6,
+            runSpacing: 6,
+            children: List.generate(words.length, (index) {
+              final String word = words[index].toUpperCase();
+
+              return _AnimatedWordChip(
+                word: word,
+                index: index,
+                color: _wordColor(word),
+              );
+            }),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _wordColor(String word) {
+    if (word.isEmpty) {
+      return const Color(0xFFFF6FAE);
+    }
+
+    return letterColors[word[0].toUpperCase()] ?? const Color(0xFFFF6FAE);
+  }
+}
+
+// ================================================================
+// ANIMATED WORD CHIP
+// ================================================================
+
+class _AnimatedWordChip extends StatefulWidget {
+  final String word;
+  final int index;
+  final Color color;
+
+  const _AnimatedWordChip({
+    required this.word,
+    required this.index,
+    required this.color,
+  });
+
+  @override
+  State<_AnimatedWordChip> createState() => _AnimatedWordChipState();
+}
+
+class _AnimatedWordChipState extends State<_AnimatedWordChip>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 420),
+    );
+
+    Future.delayed(Duration(milliseconds: 100 + widget.index * 70), () {
+      if (mounted) {
+        _controller.forward();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        final double t = Curves.easeOutBack.transform(_controller.value);
+
+        return Opacity(
+          opacity: _controller.value.clamp(0.0, 1.0),
+          child: Transform.scale(scale: 0.82 + (0.18 * t), child: child),
+        );
+      },
+      child: Container(
+        constraints: const BoxConstraints(minWidth: 72),
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: widget.color.withValues(alpha: 0.18)),
+          boxShadow: [
+            BoxShadow(
+              color: widget.color.withValues(alpha: 0.08),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 18,
+              height: 18,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: widget.color.withValues(alpha: 0.13),
+              ),
+              child: Icon(Icons.check_rounded, size: 11, color: widget.color),
+            ),
+
+            const SizedBox(width: 5),
+
+            Text(
+              widget.word,
+              style: const TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w900,
+                color: Color(0xFF45333B),
+                letterSpacing: 0.6,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ================================================================
+// SCORE REWARD
+// ================================================================
+
+class _ScoreReward extends StatelessWidget {
+  final int score;
+
+  const _ScoreReward({required this.score});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const Icon(Icons.stars_rounded, size: 22, color: Color(0xFFFFB92E)),
+
+        const SizedBox(width: 7),
+
+        const Text(
+          'SCORE',
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w900,
+            color: Color(0xFF947481),
+            letterSpacing: 1.4,
+          ),
+        ),
+
+        const SizedBox(width: 9),
+
+        TweenAnimationBuilder<int>(
+          tween: IntTween(begin: 0, end: score),
+          duration: const Duration(milliseconds: 850),
+          curve: Curves.easeOutCubic,
+          builder: (context, value, child) {
+            return Text(
+              '+$value',
+              style: const TextStyle(
+                fontSize: 21,
+                fontWeight: FontWeight.w900,
+                color: Color(0xFFFF4D96),
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+// ================================================================
+// NEXT LEVEL BUTTON
+// ================================================================
+
+class _NextLevelButton extends StatefulWidget {
+  final VoidCallback onPressed;
+
+  const _NextLevelButton({required this.onPressed});
+
+  @override
+  State<_NextLevelButton> createState() => _NextLevelButtonState();
+}
+
+class _NextLevelButtonState extends State<_NextLevelButton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        final double t = Curves.easeInOut.transform(_controller.value);
+
+        return GestureDetector(
+          onTap: widget.onPressed,
+          child: Container(
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFFFF8FBE), Color(0xFFFF4D96)],
+              ),
+              borderRadius: BorderRadius.circular(18),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFFFF4D96).withValues(alpha: 0.25),
+                  blurRadius: 15 + (t * 5),
+                  spreadRadius: 1,
+                  offset: const Offset(0, 5),
+                ),
+              ],
+            ),
+            child: Stack(
+              children: [
+                // ==============================================
+                // SHINE
+                // ==============================================
+
+                Positioned.fill(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(18),
+                    child: FractionallySizedBox(
+                      widthFactor: 0.30,
+                      alignment: Alignment(-1.8 + (t * 5.6), 0),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              Colors.white.withValues(alpha: 0.0),
+                              Colors.white.withValues(alpha: 0.20),
+                              Colors.white.withValues(alpha: 0.0),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+
+                // ==============================================
+                // CONTENT
+                // ==============================================
+                Center(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'NEXT LEVEL',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1.15,
+                        ),
+                      ),
+
+                      const SizedBox(width: 10),
+
+                      Container(
+                        width: 30,
+                        height: 30,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.18),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.arrow_forward_rounded,
+                          color: Colors.white,
+                          size: 19,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ================================================================
+// STARS
+// ================================================================
+
 class _StarRow extends StatelessWidget {
   final int stars;
+
   const _StarRow({required this.stars});
 
   @override
@@ -2694,19 +3422,48 @@ class _StarRow extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: List.generate(3, (i) {
         final bool filled = i < stars;
+
         return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 5),
           child: TweenAnimationBuilder<double>(
-            tween: Tween(begin: 0, end: filled ? 1 : 0.6),
-            duration: Duration(milliseconds: 400 + i * 150),
+            tween: Tween(begin: 0.0, end: filled ? 1.0 : 0.78),
+            duration: Duration(milliseconds: 500 + i * 180),
             curve: Curves.elasticOut,
             builder: (context, scale, child) {
               return Transform.scale(
                 scale: scale,
-                child: Icon(
-                  filled ? Icons.star_rounded : Icons.star_border_rounded,
-                  size: 40,
-                  color: filled ? const Color(0xFFFFC857) : Colors.black26,
+                child: Container(
+                  width: 52,
+                  height: 52,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: filled
+                        ? const LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [Color(0xFFFFF7DF), Color(0xFFFFE7A5)],
+                          )
+                        : null,
+                    color: filled ? null : const Color(0xFFF3F0ED),
+                    boxShadow: filled
+                        ? [
+                            BoxShadow(
+                              color: const Color(
+                                0xFFFFC857,
+                              ).withValues(alpha: 0.22),
+                              blurRadius: 12,
+                              spreadRadius: 1,
+                            ),
+                          ]
+                        : null,
+                  ),
+                  child: Icon(
+                    filled ? Icons.star_rounded : Icons.star_border_rounded,
+                    size: 35,
+                    color: filled
+                        ? const Color(0xFFFFB92E)
+                        : const Color(0xFFC9C1BC),
+                  ),
                 ),
               );
             },
