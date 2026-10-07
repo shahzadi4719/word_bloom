@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 
 import 'bubble.dart';
 import 'levels.dart';
+import 'booster_service.dart';
+import 'booster_model.dart';
+import 'booster_bar.dart';
 
 /// A bubble that has just popped - purely visual, it no longer
 /// exists in `bubbles` / affects game logic.
@@ -176,8 +179,32 @@ class GameEngine {
   final Set<int> wildIds = {};
 
   static const List<String> _alphabet = [
-    'A','B','C','D','E','F','G','H','I','J','K','L','M',
-    'N','O','P','Q','R','S','T','U','V','W','X','Y','Z',
+    'A',
+    'B',
+    'C',
+    'D',
+    'E',
+    'F',
+    'G',
+    'H',
+    'I',
+    'J',
+    'K',
+    'L',
+    'M',
+    'N',
+    'O',
+    'P',
+    'Q',
+    'R',
+    'S',
+    'T',
+    'U',
+    'V',
+    'W',
+    'X',
+    'Y',
+    'Z',
   ];
 
   // ---- per-level rules --------------------------------------------------
@@ -217,9 +244,9 @@ class GameEngine {
 
   /// Highest y where a shot bubble's center can go (aim line and
   /// bubble both stop here). Raise this number if it hits the top bar.
-    double get _ceilingY => headerY + bubbleRadius * _aspect;
+  double get _ceilingY => headerY + bubbleRadius * _aspect;
 
-    final double dangerLineY = 0.86;
+  final double dangerLineY = 0.86;
 
   /// Fraction of the screen height covered by the top bar area.
   static const double headerY = 0.125;
@@ -374,43 +401,103 @@ class GameEngine {
   static const List<List<String>> _patterns = [
     // Keyhole
     [
-      '..##..', '.####.', '##..##', '#....#', '##..##', '.####.',
-      '..###.', '..##..', '..###.', '..##..', '..###.',
+      '..##..',
+      '.####.',
+      '##..##',
+      '#....#',
+      '##..##',
+      '.####.',
+      '..###.',
+      '..##..',
+      '..###.',
+      '..##..',
+      '..###.',
     ],
     // Hourglass
     [
-      '######', '.####.', '..##..', '..##..', '..##..', '..##..',
-      '.####.', '.####.', '######',
+      '######',
+      '.####.',
+      '..##..',
+      '..##..',
+      '..##..',
+      '..##..',
+      '.####.',
+      '.####.',
+      '######',
     ],
     // Big diamond
     [
-      '..##..', '.####.', '######', '######', '.####.', '.####.',
-      '..##..', '..##..', '..#...',
+      '..##..',
+      '.####.',
+      '######',
+      '######',
+      '.####.',
+      '.####.',
+      '..##..',
+      '..##..',
+      '..#...',
     ],
     // Snake
     [
-      '######', '#.....', '##....', '.##...', '..##..', '...##.',
-      '....##', '...##.', '..##..', '.##...', '##....',
+      '######',
+      '#.....',
+      '##....',
+      '.##...',
+      '..##..',
+      '...##.',
+      '....##',
+      '...##.',
+      '..##..',
+      '.##...',
+      '##....',
     ],
     // Pillars
     [
-      '######', '##..##', '##..##', '##..##', '##..##', '##..##',
-      '##..##', '######',
+      '######',
+      '##..##',
+      '##..##',
+      '##..##',
+      '##..##',
+      '##..##',
+      '##..##',
+      '######',
     ],
     // Tall ring
     [
-      '.####.', '##..##', '#....#', '##..##', '.####.', '..##..',
-      '..##..', '..##..',
+      '.####.',
+      '##..##',
+      '#....#',
+      '##..##',
+      '.####.',
+      '..##..',
+      '..##..',
+      '..##..',
     ],
     // Funnel
     [
-      '######', '######', '.####.', '.####.', '..##..', '..##..',
-      '...#..', '..#...', '..#...',
+      '######',
+      '######',
+      '.####.',
+      '.####.',
+      '..##..',
+      '..##..',
+      '...#..',
+      '..#...',
+      '..#...',
     ],
     // Chevron
     [
-      '######', '.#####', '..####', '...###', '....##', '.....#',
-      '....##', '...###', '..####', '.#####', '######',
+      '######',
+      '.#####',
+      '..####',
+      '...###',
+      '....##',
+      '.....#',
+      '....##',
+      '...###',
+      '..####',
+      '.#####',
+      '######',
     ],
   ];
 
@@ -587,16 +674,22 @@ class GameEngine {
 
     // helpers first, so they always get a slot
     for (int k = 0; k < _wildCountFor(n) && hasRoom(); k++, i++) {
-      final Bubble w =
-          _replaceBubble(candidates[i], '*', const Color(0xFFFFC857));
+      final Bubble w = _replaceBubble(
+        candidates[i],
+        '*',
+        const Color(0xFFFFC857),
+      );
       wildIds.add(w.id);
     }
     for (int k = 0; k < _bombCountFor(n) && hasRoom(); k++, i++) {
       bombIds.add(candidates[i].id);
     }
     for (int k = 0; k < cut(_stoneCountFor(n)) && hasRoom(); k++, i++) {
-      final Bubble st =
-          _replaceBubble(candidates[i], '#', const Color(0xFF7D8491));
+      final Bubble st = _replaceBubble(
+        candidates[i],
+        '#',
+        const Color(0xFF7D8491),
+      );
       stoneIds.add(st.id);
     }
     for (int k = 0; k < cut(_lockCountFor(n)) && hasRoom(); k++, i++) {
@@ -736,7 +829,11 @@ class GameEngine {
 
   /// Swaps the ball about to be fired with the one right after it.
   bool swapNextTwo() {
-    if (shooting || levelComplete || gameOver || goalReached || currentLevel == null) {
+    if (shooting ||
+        levelComplete ||
+        gameOver ||
+        goalReached ||
+        currentLevel == null) {
       return false;
     }
     if (swapsLeft == 0) return false;
@@ -834,8 +931,7 @@ class GameEngine {
       dx = -dx;
     }
 
-    final List<Offset> path =
-        pts.map((p) => Offset(p.dx, p.dy * a)).toList();
+    final List<Offset> path = pts.map((p) => Offset(p.dx, p.dy * a)).toList();
 
     final Offset end = path.last;
     final Bubble temp = Bubble(
@@ -1005,10 +1101,7 @@ class GameEngine {
 
   Offset? _findSnapPosition(Bubble flying) {
     if (bubbles.isEmpty) {
-      return Offset(
-        flying.x.clamp(bubbleRadius, 1 - bubbleRadius),
-        _topRowY,
-      );
+      return Offset(flying.x.clamp(bubbleRadius, 1 - bubbleRadius), _topRowY);
     }
 
     final double vSpace = verticalSpacing;
@@ -1039,8 +1132,7 @@ class GameEngine {
 
           if (!_positionIsFree(x, y)) continue;
 
-          final double distance =
-              _physicalDistance(flying.x - x, flying.y - y);
+          final double distance = _physicalDistance(flying.x - x, flying.y - y);
 
           if (distance < bestDistance) {
             bestDistance = distance;
@@ -1064,8 +1156,7 @@ class GameEngine {
 
   bool _positionIsFree(double x, double y) {
     for (final Bubble bubble in bubbles) {
-      final double distance =
-          _physicalDistance(bubble.x - x, bubble.y - y);
+      final double distance = _physicalDistance(bubble.x - x, bubble.y - y);
 
       if (distance < horizontalSpacing * 0.80) return false;
     }
@@ -1169,8 +1260,10 @@ class GameEngine {
     for (final Bubble bubble in bubbles) {
       if (bubble.id == source.id) continue;
 
-      final double distance =
-          _physicalDistance(bubble.x - source.x, bubble.y - source.y);
+      final double distance = _physicalDistance(
+        bubble.x - source.x,
+        bubble.y - source.y,
+      );
 
       if (distance <= horizontalSpacing * 1.30) {
         neighbors.add(bubble);
@@ -1211,7 +1304,6 @@ class GameEngine {
 
     // Last word found: everything left on the board falls away.
     if (goalReached) _cascadeBoard();
-
   }
 
   void _updatePopAnimation() {
@@ -1351,8 +1443,9 @@ class GameEngine {
       }
     }
 
-    final List<Bubble> floating =
-        bubbles.where((b) => !connected.contains(b.id)).toList();
+    final List<Bubble> floating = bubbles
+        .where((b) => !connected.contains(b.id))
+        .toList();
 
     for (final Bubble b in floating) {
       bubbles.removeWhere((x) => x.id == b.id);
@@ -1385,8 +1478,9 @@ class GameEngine {
 
     // Leftover shots fly out of the ring one by one (see _updateWin).
     bonusShotsLeft = max(0, (currentLevel?.maxShots ?? 0) - shotsUsed);
-    _bonusInterval =
-        (2.4 / max(1, bonusShotsLeft)).clamp(0.035, 0.12).toDouble();
+    _bonusInterval = (2.4 / max(1, bonusShotsLeft))
+        .clamp(0.035, 0.12)
+        .toDouble();
     _bonusTimer = 0;
     _winWait = 1.0; // let the board finish falling first
     _winPending = true;
@@ -1473,7 +1567,7 @@ class GameEngine {
   // ============================================================
 
   /// Hidden rows above the screen can't be used for words yet.
-    bool _isOnScreen(Bubble b) => b.y >= _ceilingY - 0.01;
+  bool _isOnScreen(Bubble b) => b.y >= _ceilingY - 0.01;
 
   void _requestScroll() {
     if (bubbles.isEmpty || _scrollOffset >= -0.001) return;
@@ -1484,8 +1578,7 @@ class GameEngine {
     }
 
     // Keep the lowest bubble at the bottom visible row.
-    final double targetBottom =
-        _topRowY + verticalSpacing * (visibleRows - 1);
+    final double targetBottom = _topRowY + verticalSpacing * (visibleRows - 1);
 
     // Never slide further than needed to reveal every hidden row.
     final double shift = min(targetBottom - lowest, -_scrollOffset);

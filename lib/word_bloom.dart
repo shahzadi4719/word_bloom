@@ -54,6 +54,33 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
   int _shotTrigger = 0;
   int _swapTrigger = 0;
 
+  // ---- NEW: praise popup ("Nice!", "Great!" ...) ----
+  int _lastWordCount = 0;
+  String? _praise;
+  int _praiseId = 0;
+  Timer? _praiseTimer;
+
+  static const List<String> _praises = [
+    'Nice!',
+    'Great!',
+    'Sweet!',
+    'Awesome!',
+    'Lovely!',
+    'Well done!',
+  ];
+
+  void _showPraise(int done, int total) {
+    final String text = done >= total
+        ? 'Amazing!'
+        : _praises[(done - 1) % _praises.length];
+    _praiseTimer?.cancel();
+    _praise = text;
+    _praiseId++;
+    _praiseTimer = Timer(const Duration(milliseconds: 1400), () {
+      if (mounted) setState(() => _praise = null);
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -91,6 +118,13 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
 
     _engine.update();
 
+    // NEW: praise when a word has just been completed.
+    final int wordCount = _engine.completedWords.length;
+    if (wordCount > _lastWordCount) {
+      _showPraise(wordCount, _engine.currentLevel?.words.length ?? 1);
+    }
+    _lastWordCount = wordCount;
+
     // Save the win the moment the last word is found, so leaving during
     // the bonus animation never loses it.
     if (_engine.goalReached && !_winSaved) {
@@ -117,6 +151,7 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    _praiseTimer?.cancel();
     _gameLoopController.dispose();
     _confettiController.dispose();
     _entranceController.dispose();
@@ -174,6 +209,8 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
   void _restartAndRetry() {
     _confettiPlayed = false;
     _winSaved = false;
+    _lastWordCount = 0;
+    _praise = null;
     _engine.retryLevel();
     setState(() {});
   }
@@ -181,6 +218,8 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
   void _goNext() {
     _confettiPlayed = false;
     _winSaved = false;
+    _lastWordCount = 0;
+    _praise = null;
     _engine.goToNextLevel();
     setState(() {});
   }
@@ -356,7 +395,7 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                     ),
                   ),
 
-                  // TOP UI (now above the board and the header band)
+                  // TOP UI: pause | level + star progress | score
                   Positioned(
                     top: 12,
                     left: 14,
@@ -364,7 +403,9 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                     child: _TopBar(
                       level: _engine.currentLevel?.number ?? 1,
                       score: _engine.score,
-                      onBack: () => Navigator.of(context).maybePop(),
+                      progress:
+                          _engine.completedWords.length /
+                          max(1, _engine.currentLevel?.words.length ?? 1),
                       onPause: _openPauseMenu,
                     ),
                   ),
@@ -443,22 +484,6 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                     ),
                   ),
 
-                  // SWAPS LEFT
-                  if (_engine.swapsLeft >= 0)
-                    Positioned(
-                      right: 14,
-                      bottom: 22,
-                      child: IgnorePointer(
-                        child: _InfoChip(
-                          icon: Icons.swap_horiz_rounded,
-                          text: '${_engine.swapsLeft}',
-                          color: _engine.swapsLeft == 0
-                              ? const Color(0xFFE0554C)
-                              : const Color(0xFF7A4A3A),
-                        ),
-                      ),
-                    ),
-
                   // TOAST: why a word didn't count
                   if (_engine.toastMessage != null)
                     Positioned(
@@ -483,6 +508,20 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                           word: _engine.foundWord!,
                           done: _engine.completedWords.length,
                           total: _engine.currentLevel?.words.length ?? 1,
+                        ),
+                      ),
+                    ),
+
+                  // NEW: PRAISE ("Nice!", "Great!" ...)
+                  if (_praise != null)
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: Align(
+                          alignment: const Alignment(0, -0.2),
+                          child: _PraisePopup(
+                            key: ValueKey(_praiseId),
+                            text: _praise!,
+                          ),
                         ),
                       ),
                     ),
@@ -722,112 +761,364 @@ class _ToastPill extends StatelessWidget {
   }
 }
 
+// ================================================================
+// TOP BAR: round pause button | level + star progress | score
+// Same glass pills as the home screen.
+// ================================================================
+
 class _TopBar extends StatelessWidget {
   final int level;
   final int score;
-  final VoidCallback onBack;
+
+  /// 0..1 = words found / words needed
+  final double progress;
   final VoidCallback onPause;
 
   const _TopBar({
     required this.level,
     required this.score,
-    required this.onBack,
+    required this.progress,
     required this.onPause,
   });
 
+  static const List<double> _starAt = [0.5, 0.75, 1.0];
+
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        _GlassBox(
-          padding: const EdgeInsets.all(9),
-          child: GestureDetector(
-            onTap: onBack,
-            child: const Icon(
-              Icons.arrow_back_rounded,
-              size: 18,
-              color: Color(0xFF292929),
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Flexible(
-          child: _GlassBox(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(
-                  Icons.auto_awesome,
-                  size: 19,
-                  color: Color(0xFFFF6FAE),
-                ),
-                const SizedBox(width: 7),
-                Flexible(
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      'LEVEL $level',
-                      maxLines: 1,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 13,
-                        letterSpacing: 0.8,
+    final double p = progress.clamp(0.0, 1.0);
+
+    return SizedBox(
+      height: 46,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _PauseButton(onTap: onPause),
+          const SizedBox(width: 10),
+
+          // LEVEL + STAR PROGRESS
+          Expanded(
+            child: _GlassBox(
+              padding: const EdgeInsets.symmetric(horizontal: 9),
+              child: Center(
+                child: Row(
+                  children: [
+                    const _BadgeIcon(
+                      icon: Icons.auto_awesome,
+                      colors: [Color(0xFFFF9BC4), Color(0xFFFF4D96)],
+                    ),
+                    const SizedBox(width: 9),
+                    Expanded(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'LEVEL $level',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w900,
+                              fontSize: 11,
+                              letterSpacing: 0.8,
+                              color: Color(0xFF7A4A3A),
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          SizedBox(
+                            height: 14,
+                            child: LayoutBuilder(
+                              builder: (context, c) {
+                                final double w = c.maxWidth;
+                                return Stack(
+                                  clipBehavior: Clip.none,
+                                  children: [
+                                    Positioned(
+                                      left: 0,
+                                      right: 0,
+                                      top: 2,
+                                      height: 10,
+                                      child: DecoratedBox(
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFFFFE3EF),
+                                          borderRadius: BorderRadius.circular(
+                                            5,
+                                          ),
+                                        ),
+                                        child: ClipRRect(
+                                          borderRadius: BorderRadius.circular(
+                                            5,
+                                          ),
+                                          child: Align(
+                                            alignment: Alignment.centerLeft,
+                                            child: TweenAnimationBuilder<double>(
+                                              tween: Tween<double>(
+                                                begin: 0,
+                                                end: p,
+                                              ),
+                                              duration: const Duration(
+                                                milliseconds: 500,
+                                              ),
+                                              curve: Curves.easeOut,
+                                              builder: (context, v, _) {
+                                                return FractionallySizedBox(
+                                                  widthFactor: v,
+                                                  heightFactor: 1,
+                                                  child: const DecoratedBox(
+                                                    decoration: BoxDecoration(
+                                                      gradient: LinearGradient(
+                                                        colors: [
+                                                          Color(0xFFFF9BC4),
+                                                          Color(0xFFFF4D96),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ),
+                                                );
+                                              },
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    for (final double at in _starAt)
+                                      Positioned(
+                                        left: (w * at - 9).clamp(0.0, w - 14),
+                                        top: -2,
+                                        child: AnimatedScale(
+                                          scale: p >= at ? 1.2 : 1.0,
+                                          duration: const Duration(
+                                            milliseconds: 300,
+                                          ),
+                                          curve: Curves.easeOutBack,
+                                          child: Icon(
+                                            Icons.star_rounded,
+                                            size: 18,
+                                            color: p >= at
+                                                ? const Color(0xFFFFB92E)
+                                                : const Color(0xFFE8CCD8),
+                                            shadows: [
+                                              Shadow(
+                                                color: Colors.white.withValues(
+                                                  alpha: 0.95,
+                                                ),
+                                                blurRadius: 2,
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                );
+                              },
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
-        ),
-        const SizedBox(width: 8),
-        Flexible(
-          child: _GlassBox(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(
-                  Icons.star_rounded,
-                  size: 20,
-                  color: Color(0xFFFFB84D),
-                ),
-                const SizedBox(width: 5),
-                Flexible(
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
+          const SizedBox(width: 10),
+
+          // SCORE
+          _GlassBox(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minWidth: 58),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const _BadgeIcon(
+                      icon: Icons.star_rounded,
+                      colors: [Color(0xFFFFD76A), Color(0xFFFFA726)],
+                    ),
+                    const SizedBox(width: 7),
+                    Text(
                       '$score',
-                      maxLines: 1,
                       style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 14,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 15,
+                        color: Color(0xFF7A4A3A),
                       ),
                     ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BadgeIcon extends StatelessWidget {
+  final IconData icon;
+  final List<Color> colors;
+
+  const _BadgeIcon({required this.icon, required this.colors});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 28,
+      height: 28,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: colors,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: colors.last.withValues(alpha: 0.35),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Icon(icon, size: 16, color: Colors.white),
+    );
+  }
+}
+
+/// Round glossy pause button (same look as the settings badge).
+class _PauseButton extends StatefulWidget {
+  final VoidCallback onTap;
+
+  const _PauseButton({required this.onTap});
+
+  @override
+  State<_PauseButton> createState() => _PauseButtonState();
+}
+
+class _PauseButtonState extends State<_PauseButton> {
+  bool _down = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _down = true),
+      onTapUp: (_) => setState(() => _down = false),
+      onTapCancel: () => setState(() => _down = false),
+      onTap: widget.onTap,
+      child: AnimatedScale(
+        scale: _down ? 0.9 : 1.0,
+        duration: const Duration(milliseconds: 90),
+        child: Container(
+          width: 46,
+          height: 46,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: const LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0xFFFF9BC4), Color(0xFFE0287F)],
+            ),
+            border: Border.all(color: Colors.white, width: 3),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFFFF4D96).withValues(alpha: 0.40),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Positioned(
+                top: 4,
+                left: 8,
+                child: Container(
+                  width: 15,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.35),
+                    borderRadius: BorderRadius.circular(4),
                   ),
                 ),
-              ],
-            ),
+              ),
+              const Icon(Icons.pause_rounded, color: Colors.white, size: 26),
+            ],
           ),
         ),
-        const SizedBox(width: 8),
-        _GlassBox(
-          padding: const EdgeInsets.all(9),
-          child: GestureDetector(
-            onTap: onPause,
-            child: const Icon(
-              Icons.pause_rounded,
-              size: 18,
-              color: Color(0xFF292929),
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
 }
 
 // ================================================================
-// PAUSE DIALOG
+// PRAISE POPUP (NEW): "Nice!", "Great!" ... when a word is completed
+// ================================================================
+
+class _PraisePopup extends StatelessWidget {
+  final String text;
+
+  const _PraisePopup({super.key, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 1400),
+      builder: (context, t, child) {
+        final double scale = t < 0.2
+            ? Curves.easeOutBack.transform(t / 0.2)
+            : 1.0 + (t - 0.2) * 0.06;
+        final double opacity = t < 0.75 ? 1.0 : 1.0 - (t - 0.75) / 0.25;
+
+        return Opacity(
+          opacity: opacity.clamp(0.0, 1.0),
+          child: Transform.translate(
+            offset: Offset(0, -36 * t),
+            child: Transform.scale(scale: scale, child: child),
+          ),
+        );
+      },
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Text(
+            text,
+            style: TextStyle(
+              fontSize: 46,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1,
+              foreground: Paint()
+                ..style = PaintingStyle.stroke
+                ..strokeWidth = 9
+                ..strokeJoin = StrokeJoin.round
+                ..color = const Color(0xFFFF4D96),
+            ),
+          ),
+          Text(
+            text,
+            style: TextStyle(
+              fontSize: 46,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1,
+              color: Colors.white,
+              shadows: [
+                Shadow(
+                  color: Colors.black.withValues(alpha: 0.22),
+                  blurRadius: 6,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ================================================================
+// PAUSE DIALOG (same style as the Settings card)
 // ================================================================
 
 class _PauseDialog extends StatefulWidget {
@@ -847,153 +1138,279 @@ class _PauseDialog extends StatefulWidget {
   State<_PauseDialog> createState() => _PauseDialogState();
 }
 
-class _PauseDialogState extends State<_PauseDialog> {
+class _PauseDialogState extends State<_PauseDialog>
+    with TickerProviderStateMixin {
   bool _musicOn = true;
   bool _soundOn = true;
   bool _vibrateOn = true;
+
+  late final AnimationController _enter;
+  late final AnimationController _loop;
+
+  @override
+  void initState() {
+    super.initState();
+    _enter = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 450),
+    )..forward();
+    _loop = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2200),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _enter.dispose();
+    _loop.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 28),
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Container(
-            padding: const EdgeInsets.fromLTRB(20, 28, 20, 24),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Color(0xFFFFDCEA), Color(0xFFFFC2DC)],
-              ),
-              borderRadius: BorderRadius.circular(28),
-              border: Border.all(color: Colors.white, width: 3),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.25),
-                  blurRadius: 20,
-                  offset: const Offset(0, 10),
-                ),
-              ],
+      elevation: 0,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 22),
+      child: AnimatedBuilder(
+        animation: Listenable.merge([_enter, _loop]),
+        builder: (context, _) {
+          final double e = Curves.easeOutBack.transform(_enter.value);
+          final double l = Curves.easeInOut.transform(_loop.value);
+
+          return Opacity(
+            opacity: Curves.easeOut.transform(_enter.value),
+            child: Transform.scale(scale: 0.85 + 0.15 * e, child: _card(l)),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _card(double l) {
+    const Color plum = Color(0xFF6B3A55);
+
+    return Stack(
+      clipBehavior: Clip.none,
+      alignment: Alignment.topCenter,
+      children: [
+        // CARD
+        Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(top: 46),
+          padding: const EdgeInsets.fromLTRB(18, 62, 18, 18),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0xFFFFEAF3), Color(0xFFFFD9E8)],
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  'Pause',
-                  style: TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.w900,
-                    color: Color(0xFF7A4A3A),
-                    shadows: [Shadow(color: Colors.white, blurRadius: 4)],
-                  ),
+            borderRadius: BorderRadius.circular(36),
+            border: Border.all(color: Colors.white, width: 4),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFFFF4D96).withValues(alpha: 0.28),
+                blurRadius: 30,
+                offset: const Offset(0, 14),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Paused',
+                style: TextStyle(
+                  fontSize: 30,
+                  fontWeight: FontWeight.w900,
+                  color: plum,
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  'Score: ${widget.score}',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF9C6E5C),
-                  ),
-                ),
-                const SizedBox(height: 18),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 14,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.45),
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  child: Column(
-                    children: [
-                      _PauseToggleRow(
-                        icon: Icons.music_note_rounded,
-                        label: 'Music',
-                        value: _musicOn,
-                        onChanged: (v) => setState(() => _musicOn = v),
-                      ),
-                      const SizedBox(height: 14),
-                      _PauseToggleRow(
-                        icon: Icons.volume_up_rounded,
-                        label: 'Sound',
-                        value: _soundOn,
-                        onChanged: (v) => setState(() => _soundOn = v),
-                      ),
-                      const SizedBox(height: 14),
-                      _PauseToggleRow(
-                        icon: Icons.vibration_rounded,
-                        label: 'Vibrate',
-                        value: _vibrateOn,
-                        onChanged: (v) => setState(() => _vibrateOn = v),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 22),
-                SizedBox(
-                  width: double.infinity,
-                  child: _PauseActionButton(
-                    label: 'Play',
-                    icon: Icons.play_arrow_rounded,
-                    colors: const [Color(0xFF8EE6B0), Color(0xFF3FBF7F)],
-                    onTap: widget.onResume,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _PauseActionButton(
-                        label: 'Retry',
-                        colors: const [Color(0xFFFF9BC4), Color(0xFFFF4D96)],
-                        onTap: widget.onRetry,
-                      ),
+              ),
+              const SizedBox(height: 18),
+              _PauseToggleRow(
+                icon: Icons.music_note_rounded,
+                label: 'Music',
+                value: _musicOn,
+                colors: const [Color(0xFFFF9BC4), Color(0xFFE0287F)],
+                onChanged: (v) => setState(() => _musicOn = v),
+              ),
+              const SizedBox(height: 12),
+              _PauseToggleRow(
+                icon: Icons.volume_up_rounded,
+                label: 'Sound',
+                value: _soundOn,
+                colors: const [Color(0xFFC8A8FF), Color(0xFF8A62D8)],
+                onChanged: (v) => setState(() => _soundOn = v),
+              ),
+              const SizedBox(height: 12),
+              _PauseToggleRow(
+                icon: Icons.vibration_rounded,
+                label: 'Vibrate',
+                value: _vibrateOn,
+                colors: const [Color(0xFFFFA77A), Color(0xFFFF7A59)],
+                onChanged: (v) => setState(() => _vibrateOn = v),
+              ),
+              const SizedBox(height: 20),
+              _PauseButton3D(
+                label: 'RESUME',
+                icon: Icons.play_arrow_rounded,
+                primary: true,
+                height: 58,
+                onTap: widget.onResume,
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: _PauseButton3D(
+                      label: 'RETRY',
+                      icon: Icons.refresh_rounded,
+                      textColor: const Color(0xFFE0287F),
+                      height: 48,
+                      onTap: widget.onRetry,
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _PauseActionButton(
-                        label: 'Exit',
-                        colors: const [Color(0xFFEE8A7C), Color(0xFFE0554C)],
-                        onTap: widget.onExit,
-                      ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _PauseButton3D(
+                      label: 'EXIT',
+                      icon: Icons.logout_rounded,
+                      textColor: plum,
+                      height: 48,
+                      onTap: widget.onExit,
                     ),
-                  ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Word Bloom  •  Score ${widget.score}',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.4,
+                  color: plum.withValues(alpha: 0.65),
                 ),
-              ],
+              ),
+            ],
+          ),
+        ),
+
+        // SPARKLES
+        Positioned(
+          top: 78,
+          left: 24,
+          child: Icon(
+            Icons.auto_awesome,
+            size: 20,
+            color: Colors.white.withValues(alpha: 0.55 + 0.45 * l),
+          ),
+        ),
+        Positioned(
+          top: 90,
+          right: 78,
+          child: Icon(
+            Icons.auto_awesome,
+            size: 14,
+            color: const Color(0xFFFF9BC4).withValues(alpha: 1 - 0.55 * l),
+          ),
+        ),
+        Positioned(
+          top: 124,
+          left: 44,
+          child: Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: const Color(0xFFFF9BC4).withValues(alpha: 0.5 + 0.4 * l),
             ),
           ),
+        ),
+
+        // CLOSE
+        Positioned(
+          top: 64,
+          right: 14,
+          child: GestureDetector(
+            onTap: widget.onResume,
+            child: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white,
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFFFF4D96).withValues(alpha: 0.22),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: const Icon(Icons.close_rounded, size: 22, color: plum),
+            ),
+          ),
+        ),
+
+        // BADGE (breathes gently)
+        Positioned(
+          top: 0,
+          child: Transform.scale(
+            scale: 1.0 + 0.035 * l,
+            child: const _PauseBadge(),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PauseBadge extends StatelessWidget {
+  const _PauseBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 92,
+      height: 92,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFFFF9BC4), Color(0xFFE0287F)],
+        ),
+        border: Border.all(color: Colors.white, width: 5),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFFF4D96).withValues(alpha: 0.40),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
           Positioned(
-            top: -14,
-            right: -8,
-            child: GestureDetector(
-              onTap: widget.onResume,
-              child: Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: const Color(0xFFE0554C),
-                  border: Border.all(color: Colors.white, width: 3),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.25),
-                      blurRadius: 8,
-                      offset: const Offset(0, 3),
-                    ),
-                  ],
-                ),
-                child: const Icon(
-                  Icons.close_rounded,
-                  color: Colors.white,
-                  size: 24,
-                ),
+            top: 9,
+            left: 16,
+            child: Container(
+              width: 36,
+              height: 14,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.32),
+                borderRadius: BorderRadius.circular(8),
               ),
             ),
+          ),
+          const Icon(
+            Icons.pause_rounded,
+            color: Colors.white,
+            size: 46,
+            shadows: [Shadow(color: Colors.black26, blurRadius: 6)],
           ),
         ],
       ),
@@ -1005,169 +1422,217 @@ class _PauseToggleRow extends StatelessWidget {
   final IconData icon;
   final String label;
   final bool value;
+  final List<Color> colors;
   final ValueChanged<bool> onChanged;
 
   const _PauseToggleRow({
     required this.icon,
     required this.label,
     required this.value,
+    required this.colors,
     required this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFFFFE7D6), Color(0xFFFFC79B)],
-            ),
-            border: Border.all(color: Colors.white, width: 2),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.12),
-                blurRadius: 4,
-                offset: const Offset(0, 2),
-              ),
-            ],
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.88),
+        borderRadius: BorderRadius.circular(26),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFFF4D96).withValues(alpha: 0.10),
+            blurRadius: 12,
+            offset: const Offset(0, 5),
           ),
-          child: Icon(icon, color: const Color(0xFF7A4A3A), size: 22),
-        ),
-        const SizedBox(width: 14),
-        Expanded(
-          child: Text(
-            label,
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w900,
-              color: Color(0xFF7A4A3A),
-              letterSpacing: 0.3,
-            ),
-          ),
-        ),
-        GestureDetector(
-          onTap: () => onChanged(!value),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            curve: Curves.easeOut,
-            width: 68,
-            height: 34,
-            padding: const EdgeInsets.all(3),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 52,
+            height: 52,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(20),
+              borderRadius: BorderRadius.circular(16),
               gradient: LinearGradient(
-                colors: value
-                    ? const [Color(0xFFFF9BC4), Color(0xFFFF4D96)]
-                    : const [Color(0xFFBFA093), Color(0xFF9C7C6E)],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: colors,
               ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.15),
-                  blurRadius: 4,
-                  offset: const Offset(0, 2),
+                  color: colors.last.withValues(alpha: 0.35),
+                  blurRadius: 8,
+                  offset: const Offset(0, 4),
                 ),
               ],
             ),
-            child: Stack(
-              alignment: Alignment.center,
+            child: Icon(icon, color: Colors.white, size: 26),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                AnimatedAlign(
-                  duration: const Duration(milliseconds: 180),
-                  curve: Curves.easeOut,
-                  alignment: value
-                      ? Alignment.centerLeft
-                      : Alignment.centerRight,
-                  child: Padding(
-                    padding: EdgeInsets.only(
-                      left: value ? 6 : 0,
-                      right: value ? 0 : 6,
-                    ),
-                    child: Text(
-                      value ? 'On' : 'Off',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 11,
-                      ),
-                    ),
+                Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                    color: Color(0xFF6B3A55),
                   ),
                 ),
-                AnimatedAlign(
+                const SizedBox(height: 2),
+                AnimatedDefaultTextStyle(
                   duration: const Duration(milliseconds: 180),
-                  curve: Curves.easeOut,
-                  alignment: value
-                      ? Alignment.centerRight
-                      : Alignment.centerLeft,
-                  child: Container(
-                    width: 26,
-                    height: 26,
-                    decoration: const BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white,
-                    ),
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                    color: value
+                        ? const Color(0xFFE0287F)
+                        : const Color(0xFF9C8A95),
                   ),
+                  child: Text(value ? 'On' : 'Off'),
                 ),
               ],
             ),
           ),
-        ),
-      ],
+          GestureDetector(
+            onTap: () => onChanged(!value),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOut,
+              width: 66,
+              height: 38,
+              padding: const EdgeInsets.all(3),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(19),
+                gradient: LinearGradient(
+                  colors: value
+                      ? const [Color(0xFFFF9BC4), Color(0xFFFF4D96)]
+                      : const [Color(0xFFEBD5DE), Color(0xFFD3B8C6)],
+                ),
+              ),
+              child: AnimatedAlign(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeOutBack,
+                alignment: value ? Alignment.centerRight : Alignment.centerLeft,
+                child: Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white,
+                    border: Border.all(
+                      color: value
+                          ? const Color(0xFFE0287F)
+                          : const Color(0xFFBFA3B2),
+                      width: 3,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.15),
+                        blurRadius: 4,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
-class _PauseActionButton extends StatelessWidget {
+/// Pill button with a solid "3D" bottom edge that presses down on tap.
+class _PauseButton3D extends StatefulWidget {
   final String label;
-  final List<Color> colors;
+  final IconData icon;
   final VoidCallback onTap;
-  final IconData? icon;
+  final bool primary;
+  final double height;
+  final Color textColor;
 
-  const _PauseActionButton({
+  const _PauseButton3D({
     required this.label,
-    required this.colors,
+    required this.icon,
     required this.onTap,
-    this.icon,
+    required this.height,
+    this.primary = false,
+    this.textColor = Colors.white,
   });
 
   @override
+  State<_PauseButton3D> createState() => _PauseButton3DState();
+}
+
+class _PauseButton3DState extends State<_PauseButton3D> {
+  bool _down = false;
+
+  @override
   Widget build(BuildContext context) {
+    final bool p = widget.primary;
+    final double edge = _down ? 2 : 5;
+
     return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 52,
-        alignment: Alignment.center,
+      onTapDown: (_) => setState(() => _down = true),
+      onTapUp: (_) => setState(() => _down = false),
+      onTapCancel: () => setState(() => _down = false),
+      onTap: widget.onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 90),
+        transform: Matrix4.translationValues(0, _down ? 3 : 0, 0),
+        height: widget.height,
         decoration: BoxDecoration(
-          gradient: LinearGradient(colors: colors),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: Colors.white, width: 2),
+          borderRadius: BorderRadius.circular(widget.height / 2),
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: p
+                ? const [Color(0xFFFF7DB8), Color(0xFFE0287F)]
+                : const [Color(0xFFFFFFFF), Color(0xFFFFEEF5)],
+          ),
+          border: Border.all(color: Colors.white, width: 2.5),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.20),
-              blurRadius: 8,
-              offset: const Offset(0, 4),
+              color: p ? const Color(0xFFB81A68) : const Color(0xFFFFB6D3),
+              offset: Offset(0, edge),
             ),
+            if (p)
+              BoxShadow(
+                color: const Color(0xFFFF4D96).withValues(alpha: 0.35),
+                blurRadius: 18,
+                offset: const Offset(0, 10),
+              ),
           ],
         ),
         child: Row(
-          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            if (icon != null) ...[
-              Icon(icon, color: Colors.white, size: 24),
-              const SizedBox(width: 6),
-            ],
+            Icon(
+              widget.icon,
+              color: widget.textColor,
+              size: p ? 30 : 22,
+              shadows: p
+                  ? const [Shadow(color: Colors.black26, blurRadius: 4)]
+                  : null,
+            ),
+            const SizedBox(width: 8),
             Text(
-              label,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 16,
+              widget.label,
+              style: TextStyle(
+                color: widget.textColor,
+                fontSize: p ? 21 : 15,
                 fontWeight: FontWeight.w900,
-                letterSpacing: 0.6,
+                letterSpacing: p ? 1.6 : 1.0,
+                shadows: p
+                    ? const [Shadow(color: Colors.black26, blurRadius: 4)]
+                    : null,
               ),
             ),
           ],
