@@ -26,10 +26,7 @@ Future<T?> _showPrettyDialog<T>(BuildContext context, WidgetBuilder builder) {
     transitionDuration: const Duration(milliseconds: 300),
     pageBuilder: (ctx, _, __) => SafeArea(
       child: Center(
-        child: Material(
-          type: MaterialType.transparency,
-          child: builder(ctx),
-        ),
+        child: Material(type: MaterialType.transparency, child: builder(ctx)),
       ),
     ),
     transitionBuilder: (ctx, anim, _, child) {
@@ -377,8 +374,10 @@ class _RoadPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final double offset = controller.hasClients ? controller.offset : 0;
 
-    final int firstList =
-        ((offset - _topPad - 300) / _spacing).floor().clamp(0, _total - 1);
+    final int firstList = ((offset - _topPad - 300) / _spacing).floor().clamp(
+      0,
+      _total - 1,
+    );
     final int lastList = ((offset - _topPad + size.height + 300) / _spacing)
         .ceil()
         .clamp(0, _total - 1);
@@ -456,7 +455,8 @@ class _RoadPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _RoadPainter old) => old.controller != controller;
+  bool shouldRepaint(covariant _RoadPainter old) =>
+      old.controller != controller;
 }
 
 class _LevelNode extends StatelessWidget {
@@ -782,8 +782,9 @@ class _PedestalGlowState extends State<_PedestalGlow>
               ),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFFFF4F9F)
-                      .withValues(alpha: 0.35 + 0.35 * t),
+                  color: const Color(
+                    0xFFFF4F9F,
+                  ).withValues(alpha: 0.35 + 0.35 * t),
                   blurRadius: 18 + 12 * t,
                   spreadRadius: 2 + 4 * t,
                 ),
@@ -820,7 +821,10 @@ class _StatPill extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.9),
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: _kPinkLight.withValues(alpha: 0.6), width: 1.5),
+        border: Border.all(
+          color: _kPinkLight.withValues(alpha: 0.6),
+          width: 1.5,
+        ),
         boxShadow: [
           BoxShadow(
             color: _kPink.withValues(alpha: 0.12),
@@ -870,7 +874,11 @@ class _StatPill extends StatelessWidget {
                     colors: [_kPinkLight, _kPink],
                   ),
                 ),
-                child: const Icon(Icons.add_rounded, size: 20, color: Colors.white),
+                child: const Icon(
+                  Icons.add_rounded,
+                  size: 20,
+                  color: Colors.white,
+                ),
               ),
             ),
         ],
@@ -930,7 +938,8 @@ class _AnimatedSettingsButtonState extends State<_AnimatedSettingsButton>
         builder: (_, __) {
           final double glow =
               0.5 + 0.5 * math.sin(_idle.value * 2 * math.pi * 4);
-          final double rotation = _idle.value * 2 * math.pi +
+          final double rotation =
+              _idle.value * 2 * math.pi +
               Curves.easeOutBack.transform(_tap.value) * math.pi;
           final double scale = 1 - 0.1 * math.sin(_tap.value * math.pi);
 
@@ -1345,9 +1354,7 @@ class _LevelPreviewDialog extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      wordCount == 1
-                          ? 'Make 1 word'
-                          : 'Make $wordCount words',
+                      wordCount == 1 ? 'Make 1 word' : 'Make $wordCount words',
                       style: const TextStyle(
                         fontSize: 19,
                         fontWeight: FontWeight.w900,
@@ -1392,7 +1399,11 @@ class _SettingsDialog extends StatelessWidget {
           size: 44,
           color: Colors.white,
           shadows: [
-            Shadow(color: Color(0x55000000), blurRadius: 5, offset: Offset(0, 2)),
+            Shadow(
+              color: Color(0x55000000),
+              blurRadius: 5,
+              offset: Offset(0, 2),
+            ),
           ],
         ),
       ),
@@ -1540,8 +1551,9 @@ class _SettingsRowState extends State<_SettingsRow> {
               child: AnimatedAlign(
                 duration: const Duration(milliseconds: 220),
                 curve: Curves.easeOut,
-                alignment:
-                    enabled ? Alignment.centerRight : Alignment.centerLeft,
+                alignment: enabled
+                    ? Alignment.centerRight
+                    : Alignment.centerLeft,
                 child: Container(
                   width: 24,
                   height: 24,
