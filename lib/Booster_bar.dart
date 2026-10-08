@@ -27,32 +27,36 @@ class BoosterBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final double w = MediaQuery.sizeOf(context).width;
-    final double slot = ((w - 28 - 12) / 5 - 10).clamp(40.0, 56.0);
+    final double orb = ((w - 24 - 12) / 5 - 10).clamp(44.0, 58.0);
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 4, 14, 10),
+      padding: const EdgeInsets.fromLTRB(12, 2, 12, 8),
       child: ListenableBuilder(
         listenable: service,
         builder: (context, _) {
           return Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
+            padding: const EdgeInsets.fromLTRB(4, 13, 4, 8),
             decoration: BoxDecoration(
               gradient: const LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [Color(0xFFFFE3EF), Color(0xFFF2E3FF), Color(0xFFE2EFFF)],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Color(0xFFFFE6F1),
+                  Color(0xFFFFCDE2),
+                  Color(0xFFEBD6FF),
+                ],
               ),
-              borderRadius: BorderRadius.circular(30),
-              border: Border.all(color: Colors.white, width: 2.5),
+              borderRadius: BorderRadius.circular(34),
+              border: Border.all(color: Colors.white, width: 3),
               boxShadow: [
                 BoxShadow(
-                  color: _rose.withValues(alpha: 0.20),
-                  blurRadius: 18,
-                  offset: const Offset(0, 6),
+                  color: _roseDeep.withValues(alpha: 0.26),
+                  blurRadius: 22,
+                  offset: const Offset(0, 8),
                 ),
                 BoxShadow(
-                  color: const Color(0xFF8FB8FF).withValues(alpha: 0.18),
-                  blurRadius: 12,
+                  color: const Color(0xFF9CC4FF).withValues(alpha: 0.22),
+                  blurRadius: 14,
                   offset: const Offset(0, 2),
                 ),
               ],
@@ -62,15 +66,34 @@ class BoosterBar extends StatelessWidget {
               children: [
                 // glossy highlight along the top edge
                 Positioned(
-                  top: -6,
-                  left: 22,
-                  right: 22,
+                  top: -9,
+                  left: 30,
+                  right: 30,
                   height: 8,
                   child: DecoratedBox(
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.55),
+                      color: Colors.white.withValues(alpha: 0.65),
                       borderRadius: BorderRadius.circular(6),
                     ),
+                  ),
+                ),
+                // little sparkles in the corners
+                Positioned(
+                  top: -7,
+                  left: 14,
+                  child: Icon(
+                    Icons.auto_awesome,
+                    size: 12,
+                    color: Colors.white.withValues(alpha: 0.95),
+                  ),
+                ),
+                Positioned(
+                  top: -7,
+                  right: 14,
+                  child: Icon(
+                    Icons.auto_awesome,
+                    size: 12,
+                    color: Colors.white.withValues(alpha: 0.95),
                   ),
                 ),
                 Row(
@@ -79,7 +102,7 @@ class BoosterBar extends StatelessWidget {
                     for (final BoosterDef def in kBoosters)
                       _BoosterSlot(
                         def: def,
-                        size: slot,
+                        size: orb,
                         qty: service.quantity(def.id),
                         unlocked: service.isUnlocked(def),
                         ready: service.loaded,
@@ -105,6 +128,21 @@ ColorFilter _saturation(double s) {
     lr * (1 - s), lg * (1 - s), lb * (1 - s) + s, 0, 0, //
     0, 0, 0, 1, 0,
   ]);
+}
+
+String _shortName(BoosterId id) {
+  switch (id) {
+    case BoosterId.bloomSwap:
+      return 'Swap';
+    case BoosterId.bloomBomb:
+      return 'Bomb';
+    case BoosterId.rainbowBloom:
+      return 'Rainbow';
+    case BoosterId.bloomLightning:
+      return 'Lightning';
+    case BoosterId.flowerBlast:
+      return 'Blast';
+  }
 }
 
 class _BoosterSlot extends StatefulWidget {
@@ -169,13 +207,17 @@ class _BoosterSlotState extends State<_BoosterSlot>
     );
     if (!usable) {
       icon = Opacity(
-        opacity: widget.unlocked ? 0.60 : 0.50,
+        opacity: widget.unlocked ? 0.62 : 0.50,
         child: ColorFiltered(
           colorFilter: _saturation(widget.unlocked ? 0.35 : 0.12),
           child: icon,
         ),
       );
     }
+
+    final String label = widget.unlocked
+        ? _shortName(widget.def.id)
+        : 'Lv ${widget.def.unlockLevel}';
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -184,85 +226,151 @@ class _BoosterSlotState extends State<_BoosterSlot>
       onTapCancel: () => setState(() => _down = false),
       onTap: widget.onTap,
       child: AnimatedScale(
-        scale: _down ? 0.90 : (widget.armed ? 1.08 : 1.0),
+        scale: _down ? 0.90 : (widget.armed ? 1.07 : 1.0),
         duration: const Duration(milliseconds: 100),
         curve: Curves.easeOut,
         child: SizedBox(
-          width: s,
-          height: s,
-          child: Stack(
-            clipBehavior: Clip.none,
+          width: s + 8,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Positioned.fill(
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(s * 0.34),
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: usable
-                          ? const [Colors.white, Color(0xFFFFE9F3)]
-                          : const [Color(0xFFF7F1F5), Color(0xFFECE2E9)],
-                    ),
-                    border: Border.all(
-                      color: widget.armed ? _rose : Colors.white,
-                      width: widget.armed ? 3 : 2,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: (usable ? _rose : _plum).withValues(
-                          alpha: usable ? 0.28 : 0.07,
-                        ),
-                        blurRadius: usable ? 12 : 6,
-                        offset: const Offset(0, 3),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              Positioned.fill(
-                child: Padding(
-                  padding: EdgeInsets.all(s * 0.10),
-                  child: icon,
-                ),
-              ),
-              if (!widget.unlocked)
-                Positioned(right: -4, bottom: -4, child: _lockBadge())
-              else
-                Positioned(right: -5, bottom: -5, child: _qtyBadge(usable)),
-              Positioned(
-                top: -18,
-                left: -10,
-                right: -10,
-                child: IgnorePointer(
-                  child: AnimatedBuilder(
-                    animation: _gain,
-                    builder: (context, _) {
-                      final double v = _gain.value;
-                      if (v <= 0 || v >= 1) return const SizedBox.shrink();
-                      final double o = v < 0.7 ? 1.0 : 1 - (v - 0.7) / 0.3;
-                      return Opacity(
-                        opacity: o.clamp(0.0, 1.0),
-                        child: Transform.translate(
-                          offset: Offset(0, -14 * v),
-                          child: Center(
-                            child: Text(
-                              '+$_gainAmount',
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w900,
-                                color: _roseDeep,
-                                shadows: [
-                                  Shadow(color: Colors.white, blurRadius: 4),
-                                ],
-                              ),
-                            ),
+              SizedBox(
+                width: s,
+                height: s,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    // the round glossy orb
+                    Positioned.fill(
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: RadialGradient(
+                            center: const Alignment(-0.3, -0.45),
+                            radius: 1.0,
+                            colors: usable
+                                ? const [
+                                    Colors.white,
+                                    Color(0xFFFFEAF3),
+                                    Color(0xFFFFCDE2),
+                                  ]
+                                : const [
+                                    Color(0xFFFBF6F9),
+                                    Color(0xFFF1E8EE),
+                                    Color(0xFFE6DAE2),
+                                  ],
+                            stops: const [0.0, 0.55, 1.0],
                           ),
+                          border: Border.all(
+                            color: widget.armed ? _rose : Colors.white,
+                            width: widget.armed ? 3.5 : 2.5,
+                          ),
+                          boxShadow: [
+                            if (widget.armed)
+                              BoxShadow(
+                                color: _rose.withValues(alpha: 0.55),
+                                blurRadius: 16,
+                                spreadRadius: 2,
+                              ),
+                            BoxShadow(
+                              color: (usable ? _rose : _plum).withValues(
+                                alpha: usable ? 0.30 : 0.08,
+                              ),
+                              blurRadius: usable ? 12 : 6,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
                         ),
-                      );
-                    },
-                  ),
+                      ),
+                    ),
+                    // small glossy shine on the orb
+                    Positioned(
+                      top: s * 0.07,
+                      left: s * 0.20,
+                      child: Container(
+                        width: s * 0.30,
+                        height: s * 0.12,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(
+                            alpha: usable ? 0.75 : 0.45,
+                          ),
+                          borderRadius: BorderRadius.circular(s),
+                        ),
+                      ),
+                    ),
+                    Positioned.fill(
+                      child: Padding(
+                        padding: EdgeInsets.all(s * 0.13),
+                        child: icon,
+                      ),
+                    ),
+                    if (!widget.unlocked)
+                      Positioned(right: -3, bottom: -3, child: _lockBadge())
+                    else
+                      Positioned(
+                        right: -4,
+                        bottom: -4,
+                        child: _qtyBadge(usable),
+                      ),
+                    Positioned(
+                      top: -20,
+                      left: -10,
+                      right: -10,
+                      child: IgnorePointer(
+                        child: AnimatedBuilder(
+                          animation: _gain,
+                          builder: (context, _) {
+                            final double v = _gain.value;
+                            if (v <= 0 || v >= 1) {
+                              return const SizedBox.shrink();
+                            }
+                            final double o = v < 0.7
+                                ? 1.0
+                                : 1 - (v - 0.7) / 0.3;
+                            return Opacity(
+                              opacity: o.clamp(0.0, 1.0),
+                              child: Transform.translate(
+                                offset: Offset(0, -14 * v),
+                                child: Center(
+                                  child: Text(
+                                    '+$_gainAmount',
+                                    style: const TextStyle(
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w900,
+                                      color: _roseDeep,
+                                      shadows: [
+                                        Shadow(
+                                          color: Colors.white,
+                                          blurRadius: 5,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 5),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.fade,
+                softWrap: false,
+                style: TextStyle(
+                  fontSize: 10,
+                  height: 1.1,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.3,
+                  color: usable
+                      ? _plum
+                      : _plum.withValues(alpha: widget.unlocked ? 0.55 : 0.45),
                 ),
               ),
             ],
@@ -274,8 +382,8 @@ class _BoosterSlotState extends State<_BoosterSlot>
 
   Widget _qtyBadge(bool usable) {
     return Container(
-      constraints: const BoxConstraints(minWidth: 21),
-      height: 21,
+      constraints: const BoxConstraints(minWidth: 22),
+      height: 22,
       padding: const EdgeInsets.symmetric(horizontal: 5),
       alignment: Alignment.center,
       decoration: BoxDecoration(
@@ -288,12 +396,19 @@ class _BoosterSlotState extends State<_BoosterSlot>
               : const [Color(0xFFD3C3CD), Color(0xFFB4A0AD)],
         ),
         border: Border.all(color: Colors.white, width: 2),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.12),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Text(
         '${widget.qty}',
         style: const TextStyle(
           color: Colors.white,
-          fontSize: 11,
+          fontSize: 12,
           fontWeight: FontWeight.w900,
           height: 1.0,
         ),
@@ -303,8 +418,8 @@ class _BoosterSlotState extends State<_BoosterSlot>
 
   Widget _lockBadge() {
     return Container(
-      width: 21,
-      height: 21,
+      width: 22,
+      height: 22,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         gradient: const LinearGradient(
@@ -314,7 +429,7 @@ class _BoosterSlotState extends State<_BoosterSlot>
         ),
         border: Border.all(color: Colors.white, width: 2),
       ),
-      child: const Icon(Icons.lock_rounded, size: 11, color: Colors.white),
+      child: const Icon(Icons.lock_rounded, size: 12, color: Colors.white),
     );
   }
 }

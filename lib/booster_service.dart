@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'progress_service.dart';
+
 // ================================================================
 // BOOSTER DEFINITIONS  (add a new booster = add one line here)
 // ================================================================
@@ -163,8 +165,21 @@ class BoosterService extends ChangeNotifier {
   bool isUnlocked(BoosterDef b) => _unlockedLevel >= b.unlockLevel;
   bool canUse(BoosterDef b) => isUnlocked(b) && quantity(b.id) > 0;
 
+  /// Re-reads the unlocked level from ProgressService (single source of
+  /// truth for progress - boosters never store their own copy).
+  Future<void> _syncUnlockedLevel() async {
+    final int fromProgress = await ProgressService.getUnlockedLevel();
+    if (fromProgress > _unlockedLevel) {
+      _unlockedLevel = fromProgress;
+      notifyListeners();
+    }
+  }
+
   Future<void> load() async {
-    if (_loaded) return;
+    if (_loaded) {
+      await _syncUnlockedLevel();
+      return;
+    }
     final SharedPreferences p = await SharedPreferences.getInstance();
 
     final bool first = !(p.getBool('booster_init') ?? false);
@@ -182,10 +197,16 @@ class BoosterService extends ChangeNotifier {
             .whereType<int>(),
       );
 
-    // TEMPORARY: replace with ProgressService's unlocked level later.
-    _unlockedLevel = p.getInt('booster_max_level') ?? 1;
+    _unlockedLevel = await ProgressService.getUnlockedLevel();
 
     if (first) {
+      // Players who already progressed before boosters existed get the
+      // starter pack for every booster they have already unlocked.
+      for (final BoosterDef b in kBoosters) {
+        if (b.unlockLevel > 1 && _unlockedLevel >= b.unlockLevel) {
+          _qty[b.id] = quantity(b.id) + kUnlockPackAmount;
+        }
+      }
       await _saveQty(p);
       await p.setBool('booster_init', true);
     }
@@ -194,13 +215,11 @@ class BoosterService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Call with the highest level the player has reached.
+  /// In-memory only: ProgressService already saves the real unlocked level.
   Future<void> setUnlockedLevel(int level) async {
     if (level <= _unlockedLevel) return;
     _unlockedLevel = level;
     notifyListeners();
-    final SharedPreferences p = await SharedPreferences.getInstance();
-    await p.setInt('booster_max_level', _unlockedLevel);
   }
 
   Future<void> add(BoosterId id, int amount) async {

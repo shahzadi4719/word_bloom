@@ -7,6 +7,8 @@ import 'game_engine.dart';
 import 'bubble.dart';
 import 'progress_service.dart';
 import 'word_dictionary.dart';
+import 'booster_service.dart';
+import 'booster_bar.dart';
 
 class WordBloom extends StatefulWidget {
   final int startLevel;
@@ -53,6 +55,29 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
 
   int _shotTrigger = 0;
   int _swapTrigger = 0;
+
+  // ---- BOOSTERS ----
+  final BoosterService _boosters = BoosterService.instance;
+  BoosterId? _armed;
+  BoosterGrant? _pendingGrant;
+
+  /// Top star bar value: only ever goes forward during a level.
+  double _shownProgress = 0;
+
+  ShotSpecial get _armedSpecial {
+    switch (_armed) {
+      case BoosterId.bloomBomb:
+        return ShotSpecial.bomb;
+      case BoosterId.rainbowBloom:
+        return ShotSpecial.rainbow;
+      case BoosterId.bloomLightning:
+        return ShotSpecial.lightning;
+      case BoosterId.flowerBlast:
+        return ShotSpecial.flower;
+      default:
+        return ShotSpecial.none;
+    }
+  }
 
   // ---- NEW: praise popup ("Nice!", "Great!" ...) ----
   int _lastWordCount = 0;
@@ -110,6 +135,11 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
       vsync: this,
       duration: const Duration(milliseconds: 850),
     )..repeat(reverse: true);
+
+    // BOOSTERS: load saved quantities + unlock state.
+    _boosters.load().then((_) {
+      _boosters.setUnlockedLevel(widget.startLevel);
+    });
   }
 
   void _gameLoopControllerListener() {
@@ -125,6 +155,10 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
     }
     _lastWordCount = wordCount;
 
+    final double wordProgress =
+        wordCount / max(1, _engine.currentLevel?.words.length ?? 1);
+    if (wordProgress > _shownProgress) _shownProgress = wordProgress;
+
     // Save the win the moment the last word is found, so leaving during
     // the bonus animation never loses it.
     if (_engine.goalReached && !_winSaved) {
@@ -136,6 +170,9 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
         debugPrint('WordBloom: saving level $completed with $stars stars');
         ProgressService.saveLevelResult(completed, stars);
 
+        // BOOSTERS: milestone rewards + unlocks for this level.
+        _claimBoosterRewards(completed);
+
         widget.onLevelComplete?.call(completed, stars);
       }
     }
@@ -144,6 +181,7 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
     if (_engine.levelComplete && !_confettiPlayed) {
       _confettiPlayed = true;
       _confettiController.play();
+      _showPendingGrant();
     }
 
     setState(() {});
@@ -182,6 +220,24 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
       return;
     }
 
+    // Booster shot: no letter is taken from the queue.
+    final ShotSpecial special = _armedSpecial;
+    if (special != ShotSpecial.none) {
+      _engine.shoot(
+        letter: ' ',
+        startX: _muzzle.dx,
+        startY: _muzzle.dy,
+        targetX: _aimX,
+        targetY: _aimY,
+        special: special,
+      );
+      if (_engine.shooting) {
+        _boosters.use(_armed!); // quantity -1, saved
+        setState(() => _armed = null);
+      }
+      return;
+    }
+
     final String letter = _engine.getNextLetter();
 
     _engine.shoot(
@@ -201,6 +257,47 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
     }
   }
 
+  // ---- BOOSTER HANDLERS ----
+
+  Future<void> _claimBoosterRewards(int completed) async {
+    final BoosterGrant grant = await _boosters.onLevelCompleted(completed);
+    if (!grant.isEmpty) _pendingGrant = grant;
+  }
+
+  void _showPendingGrant() {
+    final BoosterGrant? g = _pendingGrant;
+    if (g == null) return;
+    _pendingGrant = null;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) showBoosterRewardDialog(context, g);
+    });
+  }
+
+  void _onBoosterTap(BoosterDef def) {
+    if (_isPaused) return;
+
+    // Locked: show the "Reach Level X" popup.
+    if (!_boosters.isUnlocked(def)) {
+      showBoosterLockedPopup(context, def);
+      return;
+    }
+    if (_boosters.quantity(def.id) <= 0) return;
+    if (_engine.gameOver || _engine.levelComplete || _engine.goalReached) {
+      return;
+    }
+
+    if (def.id == BoosterId.bloomSwap) {
+      if (_engine.swapNextTwo(ignoreLimit: true)) {
+        _boosters.use(def.id);
+        setState(() => _swapTrigger++);
+      }
+      return;
+    }
+
+    // The other 4: tap to arm, tap again to cancel, then shoot normally.
+    setState(() => _armed = (_armed == def.id) ? null : def.id);
+  }
+
   Color _bubbleColor(String letter) {
     return _engine.letterColors[letter.toUpperCase()] ??
         const Color(0xFF7E8CFF);
@@ -211,6 +308,9 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
     _winSaved = false;
     _lastWordCount = 0;
     _praise = null;
+    _armed = null;
+    _pendingGrant = null;
+    _shownProgress = 0;
     _engine.retryLevel();
     setState(() {});
   }
@@ -220,6 +320,9 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
     _winSaved = false;
     _lastWordCount = 0;
     _praise = null;
+    _armed = null;
+    _pendingGrant = null;
+    _shownProgress = 0;
     _engine.goToNextLevel();
     setState(() {});
   }
@@ -260,307 +363,344 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
     return Scaffold(
       backgroundColor: const Color(0xFFF7F3ED),
       body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final Size size = Size(constraints.maxWidth, constraints.maxHeight);
+        child: Column(
+          children: [
+            Expanded(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final Size size = Size(
+                    constraints.maxWidth,
+                    constraints.maxHeight,
+                  );
 
-            if (!_initialized) {
-              _engine.configureForScreen(size);
-              _engine.startLevel(widget.startLevel);
-              _initialized = true;
-              _aimY = _engine.boardTopY + 0.05;
-              _showTutorial = widget.startLevel == 1;
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted) _entranceController.forward(from: 0);
-              });
-            }
+                  if (!_initialized) {
+                    _engine.configureForScreen(size);
+                    _engine.startLevel(widget.startLevel);
+                    _initialized = true;
+                    _aimY = _engine.boardTopY + 0.05;
+                    _showTutorial = widget.startLevel == 1;
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (mounted) _entranceController.forward(from: 0);
+                    });
+                  }
 
-            return GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onPanStart: (details) {
-                if (_isPaused) return;
-                _updateAim(details.localPosition, size);
-                setState(() {
-                  _isAiming = true;
-                  _showTutorial = false;
-                });
-              },
-              onPanUpdate: (details) {
-                if (_isPaused) return;
-                _updateAim(details.localPosition, size);
-              },
-              onPanEnd: (_) {
-                if (_isPaused) return;
-                if (_isAiming) _shoot();
-                setState(() => _isAiming = false);
-              },
-              onPanCancel: () {
-                if (_isPaused) return;
-                setState(() => _isAiming = false);
-              },
-              child: Stack(
-                children: [
-                  Positioned.fill(
-                    child: Container(
-                      decoration: const BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [Color(0xFFCDEFFF), Color(0xFFF7F3ED)],
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  // GAME BOARD (board bubbles + bubbles that are falling off)
-                  Positioned.fill(
-                    child: AnimatedBuilder(
-                      animation: Listenable.merge([
-                        _entranceController,
-                        _flyingGlowController,
-                      ]),
-                      builder: (context, _) {
-                        return CustomPaint(
-                          painter: _GameBoardPainter(
-                            bubbles: [
-                              ..._engine.bubbles,
-                              ..._engine.fallingBubbles,
-                            ],
-                            flyingBubble: _engine.flyingBubble,
-                            stoneIds: _engine.stoneIds,
-                            lockHits: _engine.lockHits,
-                            iceIds: _engine.iceIds,
-                            hiddenIds: _engine.hiddenIds,
-                            bombIds: _engine.bombIds,
-                            wildIds: _engine.wildIds,
-                            entranceProgress: _entranceController.value,
-                            flyingPulse: _flyingGlowController.value,
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-
-                  // BUBBLE POP EFFECT
-                  Positioned.fill(
-                    child: CustomPaint(
-                      painter: _FlyingPopPainter(pops: _engine.flyingPops),
-                    ),
-                  ),
-
-                  // AIMING LINE - drawn from the engine's own simulation,
-                  // so it is exactly the path (and landing slot) of the shot.
-                  if (_isAiming &&
-                      !_engine.gameOver &&
-                      !_engine.levelComplete &&
-                      !_engine.shooting)
-                    Positioned.fill(
-                      child: CustomPaint(
-                        painter: _AimingLinePainter(
-                          points: _engine
-                              .previewShot(
-                                letter: _engine.getNextLetterPreview(),
-                                startX: _muzzle.dx,
-                                startY: _muzzle.dy,
-                                targetX: _aimX,
-                                targetY: _aimY,
-                              )
-                              .path,
-                          color: _bubbleColor(_engine.getNextLetterPreview()),
-                        ),
-                      ),
-                    ),
-
-                  // SOLID HEADER band (hides board bubbles behind the top bar)
-                  Positioned(
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    height: size.height * GameEngine.headerY,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            const Color(0xFFCDEFFF),
-                            Color.lerp(
-                              const Color(0xFFCDEFFF),
-                              const Color(0xFFF7F3ED),
-                              GameEngine.headerY,
-                            )!,
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  // TOP UI: pause | level + star progress | score
-                  Positioned(
-                    top: 12,
-                    left: 14,
-                    right: 14,
-                    child: _TopBar(
-                      level: _engine.currentLevel?.number ?? 1,
-                      score: _engine.score,
-                      progress:
-                          _engine.completedWords.length /
-                          max(1, _engine.currentLevel?.words.length ?? 1),
-                      onPause: _openPauseMenu,
-                    ),
-                  ),
-
-                  // BUBBLE LAUNCHER RING
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: SizedBox(
-                      height: 210,
-                      child: _LauncherRing(
-                        currentLetter: _engine.getNextLetterPreview(),
-                        nextLetter: _engine.getLetterAfterNextPreview(),
-                        currentColor: _bubbleColor(
-                          _engine.getNextLetterPreview(),
-                        ),
-                        nextColor: _bubbleColor(
-                          _engine.getLetterAfterNextPreview(),
-                        ),
-                        shotsRemaining: _remainingShots,
-                        shotTrigger: _shotTrigger,
-                        swapTrigger: _swapTrigger,
-                        onSwapTap: _handleSwap,
-                      ),
-                    ),
-                  ),
-
-                  // LEFTOVER SHOTS flying out of the ring after a win
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: CustomPaint(
-                        painter: _BonusShotPainter(
-                          shots: _engine.bonusShots,
-                          radiusFrac: _engine.bubbleRadius,
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  // STATUS CHIPS: words goal (+ letter rule), timer, board drop
-                  Positioned(
-                    top: 62,
-                    left: 14,
-                    right: 14,
-                    child: IgnorePointer(
-                      child: Wrap(
-                        alignment: WrapAlignment.center,
-                        spacing: 8,
-                        runSpacing: 6,
-                        children: [
-                          _InfoChip(
-                            icon: Icons.flag_rounded,
-                            text:
-                                'Words ${_engine.completedWords.length}/${_engine.currentLevel?.words.length ?? 1} · ${_engine.lengthRuleText}',
-                            color: const Color(0xFFFF4D96),
-                          ),
-                          if (_engine.timeLimit > 0)
-                            _InfoChip(
-                              icon: Icons.timer_rounded,
-                              text: _formatTime(_engine.timeLeft),
-                              color: _engine.timeLeft <= 10
-                                  ? const Color(0xFFE0554C)
-                                  : const Color(0xFF292929),
+                  return GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onPanStart: (details) {
+                      if (_isPaused) return;
+                      _updateAim(details.localPosition, size);
+                      setState(() {
+                        _isAiming = true;
+                        _showTutorial = false;
+                      });
+                    },
+                    onPanUpdate: (details) {
+                      if (_isPaused) return;
+                      _updateAim(details.localPosition, size);
+                    },
+                    onPanEnd: (_) {
+                      if (_isPaused) return;
+                      if (_isAiming) _shoot();
+                      setState(() => _isAiming = false);
+                    },
+                    onPanCancel: () {
+                      if (_isPaused) return;
+                      setState(() => _isAiming = false);
+                    },
+                    child: Stack(
+                      children: [
+                        Positioned.fill(
+                          child: Container(
+                            decoration: const BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [Color(0xFFCDEFFF), Color(0xFFF7F3ED)],
+                              ),
                             ),
-                          if (_engine.shotsUntilDescend > 0)
-                            _InfoChip(
-                              icon: Icons.south_rounded,
-                              text: 'Drop ${_engine.shotsUntilDescend}',
-                              color: _engine.shotsUntilDescend <= 3
-                                  ? const Color(0xFFE0554C)
-                                  : const Color(0xFFF2A93B),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                  // TOAST: why a word didn't count
-                  if (_engine.toastMessage != null)
-                    Positioned(
-                      top: 118,
-                      left: 24,
-                      right: 24,
-                      child: IgnorePointer(
-                        child: Center(
-                          child: _ToastPill(text: _engine.toastMessage!),
-                        ),
-                      ),
-                    ),
-
-                  // FOUND WORD
-                  if (_engine.foundWord != null)
-                    Positioned(
-                      top: 150,
-                      left: 0,
-                      right: 0,
-                      child: Center(
-                        child: _FoundWord(
-                          word: _engine.foundWord!,
-                          done: _engine.completedWords.length,
-                          total: _engine.currentLevel?.words.length ?? 1,
-                        ),
-                      ),
-                    ),
-
-                  // NEW: PRAISE ("Nice!", "Great!" ...)
-                  if (_praise != null)
-                    Positioned.fill(
-                      child: IgnorePointer(
-                        child: Align(
-                          alignment: const Alignment(0, -0.2),
-                          child: _PraisePopup(
-                            key: ValueKey(_praiseId),
-                            text: _praise!,
                           ),
                         ),
-                      ),
-                    ),
 
-                  // GAME OVER
-                  if (_engine.gameOver)
-                    Positioned.fill(
-                      child: _GameOverOverlay(
-                        onPressed: _restartAndRetry,
-                        message: _engine.timeUp
-                            ? "Time's up!"
-                            : 'You ran out of shots',
-                      ),
-                    ),
+                        // GAME BOARD (board bubbles + bubbles that are falling off)
+                        Positioned.fill(
+                          child: AnimatedBuilder(
+                            animation: Listenable.merge([
+                              _entranceController,
+                              _flyingGlowController,
+                            ]),
+                            builder: (context, _) {
+                              return CustomPaint(
+                                painter: _GameBoardPainter(
+                                  bubbles: [
+                                    ..._engine.bubbles,
+                                    ..._engine.fallingBubbles,
+                                  ],
+                                  flyingBubble: _engine.flyingBubble,
+                                  flyingSpecial: _engine.flyingSpecial,
+                                  stoneIds: _engine.stoneIds,
+                                  lockHits: _engine.lockHits,
+                                  iceIds: _engine.iceIds,
+                                  hiddenIds: _engine.hiddenIds,
+                                  bombIds: _engine.bombIds,
+                                  wildIds: _engine.wildIds,
+                                  entranceProgress: _entranceController.value,
+                                  flyingPulse: _flyingGlowController.value,
+                                ),
+                              );
+                            },
+                          ),
+                        ),
 
-                  // LEVEL COMPLETE
-                  if (_engine.levelComplete)
-                    Positioned.fill(
-                      child: _LevelCompleteOverlay(
-                        confettiController: _confettiController,
-                        score: _engine.score,
-                        stars: _engine.starsEarned,
-                        completedWords: _engine.completedWords,
-                        letterColors: _engine.letterColors,
-                        onPressed: _goNext,
-                      ),
+                        // BUBBLE POP EFFECT
+                        Positioned.fill(
+                          child: CustomPaint(
+                            painter: _FlyingPopPainter(pops: _engine.flyingPops),
+                          ),
+                        ),
+
+                        // BOOSTER EFFECTS (glow, petals, lightning beam)
+                        Positioned.fill(
+                          child: IgnorePointer(
+                            child: CustomPaint(
+                              painter: _BoosterEffectPainter(
+                                effects: _engine.boosterEffects,
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        // AIMING LINE - drawn from the engine's own simulation,
+                        // so it is exactly the path (and landing slot) of the shot.
+                        if (_isAiming &&
+                            !_engine.gameOver &&
+                            !_engine.levelComplete &&
+                            !_engine.shooting)
+                          Positioned.fill(
+                            child: CustomPaint(
+                              painter: _AimingLinePainter(
+                                points: _engine
+                                    .previewShot(
+                                      letter: _engine.getNextLetterPreview(),
+                                      startX: _muzzle.dx,
+                                      startY: _muzzle.dy,
+                                      targetX: _aimX,
+                                      targetY: _aimY,
+                                      special: _armedSpecial,
+                                    )
+                                    .path,
+                                color: _armedSpecial == ShotSpecial.none
+                                    ? _bubbleColor(
+                                        _engine.getNextLetterPreview(),
+                                      )
+                                    : GameEngine.specialColor(_armedSpecial),
+                              ),
+                            ),
+                          ),
+
+                        // SOLID HEADER band (hides board bubbles behind the top bar)
+                        Positioned(
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          height: size.height * GameEngine.headerY,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  const Color(0xFFCDEFFF),
+                                  Color.lerp(
+                                    const Color(0xFFCDEFFF),
+                                    const Color(0xFFF7F3ED),
+                                    GameEngine.headerY,
+                                  )!,
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        // TOP UI: pause | level + star progress | score
+                        Positioned(
+                          top: 12,
+                          left: 14,
+                          right: 14,
+                          child: _TopBar(
+                            level: _engine.currentLevel?.number ?? 1,
+                            score: _engine.score,
+                            progress: _shownProgress,
+                            onPause: _openPauseMenu,
+                          ),
+                        ),
+
+                        // BUBBLE LAUNCHER RING
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          child: SizedBox(
+                            height: 210,
+                            child: _LauncherRing(
+                              currentLetter: _engine.getNextLetterPreview(),
+                              nextLetter: _engine.getLetterAfterNextPreview(),
+                              currentColor: _bubbleColor(
+                                _engine.getNextLetterPreview(),
+                              ),
+                              nextColor: _bubbleColor(
+                                _engine.getLetterAfterNextPreview(),
+                              ),
+                              shotsRemaining: _remainingShots,
+                              shotTrigger: _shotTrigger,
+                              swapTrigger: _swapTrigger,
+                              onSwapTap: _handleSwap,
+                            ),
+                          ),
+                        ),
+
+                        // LEFTOVER SHOTS flying out of the ring after a win
+                        Positioned.fill(
+                          child: IgnorePointer(
+                            child: CustomPaint(
+                              painter: _BonusShotPainter(
+                                shots: _engine.bonusShots,
+                                radiusFrac: _engine.bubbleRadius,
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        // STATUS CHIPS: words goal (+ letter rule), timer, board drop
+                        Positioned(
+                          top: 68,
+                          left: 14,
+                          right: 14,
+                          child: IgnorePointer(
+                            child: Wrap(
+                              alignment: WrapAlignment.center,
+                              spacing: 10,
+                              runSpacing: 8,
+                              children: [
+                                _InfoChip(
+                                  icon: Icons.flag_rounded,
+                                  text:
+                                      'Words ${_engine.completedWords.length}/${_engine.currentLevel?.words.length ?? 1} · ${_engine.lengthRuleText}',
+                                  color: const Color(0xFFFF4D96),
+                                ),
+                                if (_engine.timeLimit > 0)
+                                  _InfoChip(
+                                    icon: Icons.timer_rounded,
+                                    text: _formatTime(_engine.timeLeft),
+                                    color: _engine.timeLeft <= 10
+                                        ? const Color(0xFFE0554C)
+                                        : const Color(0xFF292929),
+                                  ),
+                                if (_engine.shotsUntilDescend > 0)
+                                  _InfoChip(
+                                    icon: Icons.south_rounded,
+                                    text: 'Drops in ${_engine.shotsUntilDescend}',
+                                    color: _engine.shotsUntilDescend <= 3
+                                        ? const Color(0xFFE0554C)
+                                        : const Color(0xFFF2A93B),
+                                  ),
+                                if (_armed != null)
+                                  _InfoChip(
+                                    icon: Icons.auto_awesome,
+                                    text: '${boosterDef(_armed!).name} ready',
+                                    color: const Color(0xFFE0287F),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+
+                        // TOAST: why a word didn't count
+                        if (_engine.toastMessage != null)
+                          Positioned(
+                            top: 118,
+                            left: 24,
+                            right: 24,
+                            child: IgnorePointer(
+                              child: Center(
+                                child: _ToastPill(text: _engine.toastMessage!),
+                              ),
+                            ),
+                          ),
+
+                        // FOUND WORD
+                        if (_engine.foundWord != null)
+                          Positioned(
+                            top: 150,
+                            left: 0,
+                            right: 0,
+                            child: Center(
+                              child: _FoundWord(
+                                word: _engine.foundWord!,
+                                done: _engine.completedWords.length,
+                                total: _engine.currentLevel?.words.length ?? 1,
+                              ),
+                            ),
+                          ),
+
+                        // NEW: PRAISE ("Nice!", "Great!" ...)
+                        if (_praise != null)
+                          Positioned.fill(
+                            child: IgnorePointer(
+                              child: Align(
+                                alignment: const Alignment(0, -0.2),
+                                child: _PraisePopup(
+                                  key: ValueKey(_praiseId),
+                                  text: _praise!,
+                                ),
+                              ),
+                            ),
+                          ),
+
+                        // GAME OVER
+                        if (_engine.gameOver)
+                          Positioned.fill(
+                            child: _GameOverOverlay(
+                              onPressed: _restartAndRetry,
+                              message: _engine.timeUp
+                                  ? "Time's up!"
+                                  : 'You ran out of shots',
+                            ),
+                          ),
+
+                        // LEVEL COMPLETE
+                        if (_engine.levelComplete)
+                          Positioned.fill(
+                            child: _LevelCompleteOverlay(
+                              confettiController: _confettiController,
+                              score: _engine.score,
+                              stars: _engine.starsEarned,
+                              completedWords: _engine.completedWords,
+                              letterColors: _engine.letterColors,
+                              onPressed: _goNext,
+                            ),
+                          ),
+                        // FIRST-SHOT TUTORIAL
+                        if (_showTutorial)
+                          Positioned.fill(
+                            child: IgnorePointer(
+                              ignoring: true,
+                              child: _TutorialOverlay(),
+                            ),
+                          ),
+                      ],
                     ),
-                  // FIRST-SHOT TUTORIAL
-                  if (_showTutorial)
-                    Positioned.fill(
-                      child: IgnorePointer(
-                        ignoring: true,
-                        child: _TutorialOverlay(),
-                      ),
-                    ),
-                ],
+                  );
+                },
               ),
-            );
-          },
+            ),
+
+            // BOOSTER BAR - below the game area, never over the shooter.
+            BoosterBar(
+              service: _boosters,
+              armed: _armed,
+              onTap: _onBoosterTap,
+            ),
+          ],
         ),
       ),
     );
@@ -696,18 +836,43 @@ class _InfoChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _GlassBox(
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+    return Container(
+      padding: const EdgeInsets.fromLTRB(6, 5, 13, 5),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.90),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white, width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: 0.20),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 17, color: color),
-          const SizedBox(width: 5),
+          Container(
+            width: 22,
+            height: 22,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color.lerp(color, Colors.white, 0.35)!, color],
+              ),
+            ),
+            child: Icon(icon, size: 13, color: Colors.white),
+          ),
+          const SizedBox(width: 7),
           Text(
             text,
             style: TextStyle(
               fontWeight: FontWeight.w900,
-              fontSize: 13,
+              fontSize: 12.5,
+              letterSpacing: 0.2,
               color: color,
             ),
           ),
@@ -764,13 +929,14 @@ class _ToastPill extends StatelessWidget {
 // ================================================================
 // TOP BAR: round pause button | level + star progress | score
 // Same glass pills as the home screen.
+// The progress fill only ever moves forward (see _shownProgress).
 // ================================================================
 
 class _TopBar extends StatelessWidget {
   final int level;
   final int score;
 
-  /// 0..1 = words found / words needed
+  /// 0..1 = words found / words needed (never goes backwards)
   final double progress;
   final VoidCallback onPause;
 
@@ -798,7 +964,7 @@ class _TopBar extends StatelessWidget {
           // LEVEL + STAR PROGRESS
           Expanded(
             child: _GlassBox(
-              padding: const EdgeInsets.symmetric(horizontal: 9),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
               child: Center(
                 child: Row(
                   children: [
@@ -806,7 +972,7 @@ class _TopBar extends StatelessWidget {
                       icon: Icons.auto_awesome,
                       colors: [Color(0xFFFF9BC4), Color(0xFFFF4D96)],
                     ),
-                    const SizedBox(width: 9),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
@@ -816,96 +982,159 @@ class _TopBar extends StatelessWidget {
                             'LEVEL $level',
                             style: const TextStyle(
                               fontWeight: FontWeight.w900,
-                              fontSize: 11,
-                              letterSpacing: 0.8,
+                              fontSize: 11.5,
+                              letterSpacing: 0.9,
+                              height: 1.1,
                               color: Color(0xFF7A4A3A),
                             ),
                           ),
                           const SizedBox(height: 3),
                           SizedBox(
-                            height: 14,
+                            height: 22,
                             child: LayoutBuilder(
                               builder: (context, c) {
                                 final double w = c.maxWidth;
-                                return Stack(
-                                  clipBehavior: Clip.none,
-                                  children: [
-                                    Positioned(
-                                      left: 0,
-                                      right: 0,
-                                      top: 2,
-                                      height: 10,
-                                      child: DecoratedBox(
-                                        decoration: BoxDecoration(
-                                          color: const Color(0xFFFFE3EF),
-                                          borderRadius: BorderRadius.circular(
-                                            5,
-                                          ),
-                                        ),
-                                        child: ClipRRect(
-                                          borderRadius: BorderRadius.circular(
-                                            5,
-                                          ),
-                                          child: Align(
-                                            alignment: Alignment.centerLeft,
-                                            child: TweenAnimationBuilder<double>(
-                                              tween: Tween<double>(
-                                                begin: 0,
-                                                end: p,
+                                return TweenAnimationBuilder<double>(
+                                  tween: Tween<double>(begin: 0, end: p),
+                                  duration: const Duration(milliseconds: 650),
+                                  curve: Curves.easeOutCubic,
+                                  builder: (context, v, _) {
+                                    return Stack(
+                                      clipBehavior: Clip.none,
+                                      children: [
+                                        // track
+                                        Positioned(
+                                          left: 0,
+                                          right: 0,
+                                          top: 6,
+                                          height: 12,
+                                          child: DecoratedBox(
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFFFFE3EF),
+                                              borderRadius:
+                                                  BorderRadius.circular(6),
+                                              border: Border.all(
+                                                color: const Color(0xFFFFD0E4),
                                               ),
-                                              duration: const Duration(
-                                                milliseconds: 500,
-                                              ),
-                                              curve: Curves.easeOut,
-                                              builder: (context, v, _) {
-                                                return FractionallySizedBox(
-                                                  widthFactor: v,
-                                                  heightFactor: 1,
-                                                  child: const DecoratedBox(
-                                                    decoration: BoxDecoration(
-                                                      gradient: LinearGradient(
-                                                        colors: [
-                                                          Color(0xFFFF9BC4),
-                                                          Color(0xFFFF4D96),
-                                                        ],
-                                                      ),
-                                                    ),
-                                                  ),
-                                                );
-                                              },
                                             ),
                                           ),
                                         ),
-                                      ),
-                                    ),
-                                    for (final double at in _starAt)
-                                      Positioned(
-                                        left: (w * at - 9).clamp(0.0, w - 14),
-                                        top: -2,
-                                        child: AnimatedScale(
-                                          scale: p >= at ? 1.2 : 1.0,
-                                          duration: const Duration(
-                                            milliseconds: 300,
-                                          ),
-                                          curve: Curves.easeOutBack,
-                                          child: Icon(
-                                            Icons.star_rounded,
-                                            size: 18,
-                                            color: p >= at
-                                                ? const Color(0xFFFFB92E)
-                                                : const Color(0xFFE8CCD8),
-                                            shadows: [
-                                              Shadow(
-                                                color: Colors.white.withValues(
-                                                  alpha: 0.95,
+                                        // fill (glossy gradient)
+                                        Positioned(
+                                          left: 0,
+                                          top: 6,
+                                          height: 12,
+                                          width: (w * v).clamp(0.0, w),
+                                          child: ClipRRect(
+                                            borderRadius: BorderRadius.circular(
+                                              6,
+                                            ),
+                                            child: Stack(
+                                              fit: StackFit.expand,
+                                              children: [
+                                                const DecoratedBox(
+                                                  decoration: BoxDecoration(
+                                                    gradient: LinearGradient(
+                                                      colors: [
+                                                        Color(0xFFFF9BC4),
+                                                        Color(0xFFFF4D96),
+                                                      ],
+                                                    ),
+                                                  ),
                                                 ),
-                                                blurRadius: 2,
-                                              ),
-                                            ],
+                                                Positioned(
+                                                  top: 1.5,
+                                                  left: 4,
+                                                  right: 4,
+                                                  height: 3,
+                                                  child: DecoratedBox(
+                                                    decoration: BoxDecoration(
+                                                      color: Colors.white
+                                                          .withValues(
+                                                            alpha: 0.5,
+                                                          ),
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            2,
+                                                          ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
                                           ),
                                         ),
-                                      ),
-                                  ],
+                                        // glowing head of the fill
+                                        if (v > 0.02)
+                                          Positioned(
+                                            left: (w * v - 7).clamp(0.0, w - 14),
+                                            top: 5,
+                                            child: Container(
+                                              width: 14,
+                                              height: 14,
+                                              decoration: BoxDecoration(
+                                                shape: BoxShape.circle,
+                                                color: Colors.white,
+                                                border: Border.all(
+                                                  color: const Color(
+                                                    0xFFFF4D96,
+                                                  ),
+                                                  width: 2.5,
+                                                ),
+                                                boxShadow: [
+                                                  BoxShadow(
+                                                    color: const Color(
+                                                      0xFFFF4D96,
+                                                    ).withValues(alpha: 0.5),
+                                                    blurRadius: 6,
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        // the 3 stars light up as the fill reaches them
+                                        for (final double at in _starAt)
+                                          Positioned(
+                                            left: (w * at - 11).clamp(
+                                              0.0,
+                                              w - 22,
+                                            ),
+                                            top: 0,
+                                            child: AnimatedScale(
+                                              scale: v >= at - 0.001
+                                                  ? 1.25
+                                                  : 1.0,
+                                              duration: const Duration(
+                                                milliseconds: 350,
+                                              ),
+                                              curve: Curves.easeOutBack,
+                                              child: Icon(
+                                                Icons.star_rounded,
+                                                size: 22,
+                                                color: v >= at - 0.001
+                                                    ? const Color(0xFFFFB92E)
+                                                    : const Color(0xFFE8CCD8),
+                                                shadows: [
+                                                  Shadow(
+                                                    color: v >= at - 0.001
+                                                        ? const Color(
+                                                            0xFFFFD76A,
+                                                          )
+                                                        : Colors.white
+                                                              .withValues(
+                                                                alpha: 0.95,
+                                                              ),
+                                                    blurRadius: v >= at - 0.001
+                                                        ? 8
+                                                        : 2,
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    );
+                                  },
                                 );
                               },
                             ),
@@ -1856,6 +2085,161 @@ class _FlyingPopPainter extends CustomPainter {
 }
 
 // ================================================================
+// BOOSTER EFFECTS (Bloom Bomb / Flower Blast / Lightning / Rainbow)
+// ================================================================
+
+BoosterId? _boosterIdFor(ShotSpecial s) {
+  switch (s) {
+    case ShotSpecial.bomb:
+      return BoosterId.bloomBomb;
+    case ShotSpecial.rainbow:
+      return BoosterId.rainbowBloom;
+    case ShotSpecial.lightning:
+      return BoosterId.bloomLightning;
+    case ShotSpecial.flower:
+      return BoosterId.flowerBlast;
+    case ShotSpecial.none:
+      return null;
+  }
+}
+
+class _BoosterEffectPainter extends CustomPainter {
+  final List<BoosterEffect> effects;
+
+  const _BoosterEffectPainter({required this.effects});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (final BoosterEffect e in effects) {
+      final double t = e.progress.clamp(0.0, 1.0);
+      final double ease = Curves.easeOut.transform(t);
+      final double fade = 1 - t;
+
+      // ---- Bloom Lightning: bright beam along the path ----
+      if (e.kind == ShotSpecial.lightning) {
+        if (e.path.length < 2) continue;
+        final Path p = Path()
+          ..moveTo(e.path.first.dx * size.width, e.path.first.dy * size.height);
+        for (int i = 1; i < e.path.length; i++) {
+          p.lineTo(e.path[i].dx * size.width, e.path[i].dy * size.height);
+        }
+
+        Paint line(double w, Color c, {double blur = 0}) {
+          final Paint paint = Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeCap = StrokeCap.round
+            ..strokeJoin = StrokeJoin.round
+            ..strokeWidth = w
+            ..color = c;
+          if (blur > 0) {
+            paint.maskFilter = MaskFilter.blur(BlurStyle.normal, blur);
+          }
+          return paint;
+        }
+
+        canvas.drawPath(
+          p,
+          line(
+            20 * fade + 4,
+            const Color(0xFFFF9BC4).withValues(alpha: fade * 0.55),
+            blur: 8,
+          ),
+        );
+        canvas.drawPath(
+          p,
+          line(
+            10 * fade + 2,
+            const Color(0xFF6FA8FF).withValues(alpha: fade * 0.9),
+          ),
+        );
+        canvas.drawPath(
+          p,
+          line(4 * fade + 1, Colors.white.withValues(alpha: fade)),
+        );
+        continue;
+      }
+
+      final Offset c = Offset(e.x * size.width, e.y * size.height);
+      final double r = e.radius * size.width;
+
+      // ---- Rainbow Bloom: small rainbow shimmer ring ----
+      if (e.kind == ShotSpecial.rainbow) {
+        final double ringR = r * (0.5 + 0.7 * ease);
+        canvas.drawCircle(
+          c,
+          ringR,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 5 * fade + 1
+            ..shader = SweepGradient(
+              colors: const [
+                Color(0xFFFF8FB8),
+                Color(0xFFFFC37A),
+                Color(0xFFFFF08A),
+                Color(0xFF9BE8B5),
+                Color(0xFF8FD0FF),
+                Color(0xFFC3A3FF),
+                Color(0xFFFF8FB8),
+              ],
+              transform: GradientRotation(t * 3),
+            ).createShader(Rect.fromCircle(center: c, radius: ringR)),
+        );
+        for (int i = 0; i < 6; i++) {
+          final double a = 2 * pi * i / 6 + t * 2;
+          canvas.drawCircle(
+            c.translate(cos(a) * ringR, sin(a) * ringR),
+            3 * fade,
+            Paint()..color = Colors.white.withValues(alpha: fade),
+          );
+        }
+        continue;
+      }
+
+      // ---- Bloom Bomb / Flower Blast: glow + wave + petals ----
+      canvas.drawCircle(
+        c,
+        r * (0.45 + 0.75 * ease),
+        Paint()
+          ..color = const Color(0xFFFF6FAE).withValues(alpha: fade * 0.30)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 16),
+      );
+      canvas.drawCircle(
+        c,
+        r * (0.25 + 0.85 * ease),
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = r * 0.12 * fade + 1.5
+          ..color = Colors.white.withValues(alpha: fade * 0.9),
+      );
+
+      final int petals = e.kind == ShotSpecial.flower ? 10 : 6;
+      final double dist = r * (0.15 + 0.85 * ease);
+      for (int i = 0; i < petals; i++) {
+        final double a = 2 * pi * i / petals + t * 0.8;
+        canvas.save();
+        canvas.translate(c.dx + cos(a) * dist, c.dy + sin(a) * dist);
+        canvas.rotate(a);
+        canvas.drawOval(
+          Rect.fromCenter(
+            center: Offset.zero,
+            width: r * 0.34 * (1 - 0.4 * t),
+            height: r * 0.16 * (1 - 0.4 * t),
+          ),
+          Paint()
+            ..color =
+                (i.isEven ? const Color(0xFFFFB3D4) : const Color(0xFFC8A8FF))
+                    .withValues(alpha: fade),
+        );
+        canvas.restore();
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _BoosterEffectPainter oldDelegate) => true;
+}
+
+// ================================================================
 // GLOSSY BUBBLE
 // ================================================================
 
@@ -1951,6 +2335,7 @@ class _GlossyBubblePainter extends CustomPainter {
 class _GameBoardPainter extends CustomPainter {
   final List<Bubble> bubbles;
   final Bubble? flyingBubble;
+  final ShotSpecial flyingSpecial;
   final Set<int> stoneIds;
   final Map<int, int> lockHits;
   final Set<int> iceIds;
@@ -1963,6 +2348,7 @@ class _GameBoardPainter extends CustomPainter {
   const _GameBoardPainter({
     required this.bubbles,
     required this.flyingBubble,
+    this.flyingSpecial = ShotSpecial.none,
     this.stoneIds = const {},
     this.lockHits = const {},
     this.iceIds = const {},
@@ -2379,6 +2765,20 @@ class _GameBoardPainter extends CustomPainter {
         pulse: flyingPulse,
         boostSize: true,
       );
+
+      // booster icon drawn on top of the flying bubble
+      final BoosterId? sp = _boosterIdFor(flyingSpecial);
+      if (sp != null) {
+        final Offset c = Offset(
+          flyingBubble!.x * size.width,
+          flyingBubble!.y * size.height,
+        );
+        final double r = flyingBubble!.radius * size.width * 1.3;
+        canvas.save();
+        canvas.translate(c.dx - r, c.dy - r);
+        BoosterIconPainter(sp).paint(canvas, Size(r * 2, r * 2));
+        canvas.restore();
+      }
     }
   }
 
@@ -3089,8 +3489,6 @@ class _LevelCompleteOverlayState extends State<_LevelCompleteOverlay>
 
   @override
   Widget build(BuildContext context) {
-    final Size screen = MediaQuery.sizeOf(context);
-
     return Container(
       color: Colors.black.withValues(alpha: 0.48),
       child: Stack(
@@ -3139,7 +3537,7 @@ class _LevelCompleteOverlayState extends State<_LevelCompleteOverlay>
                 );
               },
               child: Container(
-                constraints: BoxConstraints(maxWidth: 430),
+                constraints: const BoxConstraints(maxWidth: 430),
 
                 margin: const EdgeInsets.symmetric(horizontal: 20),
                 decoration: BoxDecoration(
@@ -3278,10 +3676,6 @@ class _LevelCompleteOverlayState extends State<_LevelCompleteOverlay>
                             ),
 
                             const SizedBox(height: 10),
-
-                            // ============================================
-                            // SUBTITLE
-                            // ============================================
 
                             // ============================================
                             // STARS
@@ -3481,10 +3875,6 @@ class _BloomPainter extends CustomPainter {
     return oldDelegate.glow != glow;
   }
 }
-
-// ================================================================
-// WORDS FOUND CARD
-// ================================================================
 
 // ================================================================
 // WORDS FOUND

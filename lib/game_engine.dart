@@ -3,9 +3,28 @@ import 'package:flutter/material.dart';
 
 import 'bubble.dart';
 import 'levels.dart';
-import 'booster_service.dart';
-import 'booster_model.dart';
-import 'booster_bar.dart';
+
+/// Special shots from the booster bar.
+enum ShotSpecial { none, bomb, rainbow, lightning, flower }
+
+/// Purely visual effect of a booster (glow, petals, lightning beam).
+class BoosterEffect {
+  final ShotSpecial kind;
+  final double x;
+  final double y;
+  final double radius; // fraction of screen width
+  final List<Offset> path; // lightning path (normalized)
+  double progress; // 0 -> 1
+
+  BoosterEffect({
+    required this.kind,
+    required this.x,
+    required this.y,
+    this.radius = 0,
+    this.path = const [],
+    this.progress = 0,
+  });
+}
 
 /// A bubble that has just popped - purely visual, it no longer
 /// exists in `bubbles` / affects game logic.
@@ -97,6 +116,28 @@ class GameEngine {
 
   final List<FlyingPopBubble> flyingPops = [];
   final List<String> collectedLetters = [];
+
+  // ---- boosters ----
+  final List<BoosterEffect> boosterEffects = [];
+  ShotSpecial _flightSpecial = ShotSpecial.none;
+
+  /// The special currently flying (none for normal shots).
+  ShotSpecial get flyingSpecial => shooting ? _flightSpecial : ShotSpecial.none;
+
+  static Color specialColor(ShotSpecial s) {
+    switch (s) {
+      case ShotSpecial.bomb:
+        return const Color(0xFFFF4D96);
+      case ShotSpecial.rainbow:
+        return const Color(0xFFFFC857);
+      case ShotSpecial.lightning:
+        return const Color(0xFF6FA8FF);
+      case ShotSpecial.flower:
+        return const Color(0xFFC8A8FF);
+      case ShotSpecial.none:
+        return const Color(0xFF7E8CFF);
+    }
+  }
 
   /// Bubbles that lost their connection to the ceiling and are
   /// falling off the board (visual + bonus score only).
@@ -332,6 +373,8 @@ class GameEngine {
     flyingBubble = null;
     _lastHitBubble = null;
     flyingPops.clear();
+    boosterEffects.clear();
+    _flightSpecial = ShotSpecial.none;
     collectedLetters.clear();
     fallingBubbles.clear();
     _fallSpeeds.clear();
@@ -828,7 +871,8 @@ class GameEngine {
   }
 
   /// Swaps the ball about to be fired with the one right after it.
-  bool swapNextTwo() {
+  /// [ignoreLimit] is used by the Bloom Swap booster (no level swap limit).
+  bool swapNextTwo({bool ignoreLimit = false}) {
     if (shooting ||
         levelComplete ||
         gameOver ||
@@ -836,7 +880,7 @@ class GameEngine {
         currentLevel == null) {
       return false;
     }
-    if (swapsLeft == 0) return false;
+    if (!ignoreLimit && swapsLeft == 0) return false;
 
     _ensureShotQueueHas(_shotQueueIndex + 1);
 
@@ -844,7 +888,7 @@ class GameEngine {
     _shotQueue[_shotQueueIndex] = _shotQueue[_shotQueueIndex + 1];
     _shotQueue[_shotQueueIndex + 1] = temp;
 
-    if (swapsLeft > 0) swapsLeft--;
+    if (!ignoreLimit && swapsLeft > 0) swapsLeft--;
     return true;
   }
 
@@ -859,14 +903,18 @@ class GameEngine {
 
   /// Path (normalized coords) the shot will take, ending at the
   /// exact slot where the bubble will land.
+  /// For [ShotSpecial.lightning] the path is a beam that passes THROUGH
+  /// bubbles (it never lands).
   ({List<Offset> path, Offset? landing, Bubble? hit}) previewShot({
     required String letter,
     required double startX,
     required double startY,
     required double targetX,
     required double targetY,
+    ShotSpecial special = ShotSpecial.none,
   }) {
     final double a = _aspect;
+    final bool beam = special == ShotSpecial.lightning;
 
     double px = startX, py = startY / a;
     double dx = targetX - startX;
@@ -892,7 +940,8 @@ class GameEngine {
     final List<Offset> pts = [Offset(px, py)];
     Bubble? hit;
 
-    for (int bounce = 0; bounce < 10; bounce++) {
+    final int maxBounces = beam ? 3 : 10;
+    for (int bounce = 0; bounce < maxBounces; bounce++) {
       double tWall = double.infinity;
       if (dx > 1e-9) tWall = (hi - px) / dx;
       if (dx < -1e-9) tWall = (lo - px) / dx;
@@ -903,18 +952,20 @@ class GameEngine {
 
       double tBub = double.infinity;
       Bubble? bubHit;
-      for (final Bubble b in bubbles) {
-        final double fx = b.x - px;
-        final double fy = b.y / a - py;
-        final double proj = fx * dx + fy * dy;
-        if (proj <= 0) continue;
-        final double perp2 = fx * fx + fy * fy - proj * proj;
-        if (perp2 > R * R) continue;
-        double th = proj - sqrt(R * R - perp2);
-        if (th < 0) th = 0;
-        if (th < tBub) {
-          tBub = th;
-          bubHit = b;
+      if (!beam) {
+        for (final Bubble b in bubbles) {
+          final double fx = b.x - px;
+          final double fy = b.y / a - py;
+          final double proj = fx * dx + fy * dy;
+          if (proj <= 0) continue;
+          final double perp2 = fx * fx + fy * fy - proj * proj;
+          if (perp2 > R * R) continue;
+          double th = proj - sqrt(R * R - perp2);
+          if (th < 0) th = 0;
+          if (th < tBub) {
+            tBub = th;
+            bubHit = b;
+          }
         }
       }
 
@@ -932,6 +983,9 @@ class GameEngine {
     }
 
     final List<Offset> path = pts.map((p) => Offset(p.dx, p.dy * a)).toList();
+
+    // Lightning is a beam: it never lands / attaches.
+    if (beam) return (path: path, landing: null, hit: null);
 
     final Offset end = path.last;
     final Bubble temp = Bubble(
@@ -956,22 +1010,30 @@ class GameEngine {
     required double startY,
     required double targetX,
     required double targetY,
+    ShotSpecial special = ShotSpecial.none,
   }) {
     if (shooting || levelComplete || gameOver || currentLevel == null) return;
     if (isScrolling || goalReached) return;
 
+    // Rainbow = wildcard ('*'). Other specials carry no letter.
+    final String shotLetter = special == ShotSpecial.none
+        ? letter
+        : (special == ShotSpecial.rainbow ? '*' : ' ');
+
     final plan = previewShot(
-      letter: letter,
+      letter: shotLetter,
       startX: startX,
       startY: startY,
       targetX: targetX,
       targetY: targetY,
+      special: special,
     );
     _flightPath = plan.path;
     _flightLanding = plan.landing;
     _flightHit = plan.hit;
     _flightSeg = 0;
     _flightDone = 0;
+    _flightSpecial = special;
 
     debugPrint('PLANNED ${plan.landing}');
 
@@ -979,8 +1041,10 @@ class GameEngine {
     flyingBubble = Bubble(
       x: startX,
       y: startY,
-      letter: letter,
-      color: _colorForLetter(letter),
+      letter: shotLetter,
+      color: special == ShotSpecial.none
+          ? _colorForLetter(letter)
+          : specialColor(special),
       radius: bubbleRadius,
     );
   }
@@ -995,6 +1059,7 @@ class GameEngine {
     _updateScroll();
     _updateWin();
     _updateBonusShots();
+    _updateBoosterEffects();
 
     if (_toastTimer > 0) {
       _toastTimer -= 0.016;
@@ -1036,7 +1101,12 @@ class GameEngine {
       flyingBubble!.x = end.dx;
       flyingBubble!.y = end.dy;
       _lastHitBubble = _flightHit;
-      _attachFlyingBubble(snapOverride: _flightLanding);
+      if (_flightSpecial == ShotSpecial.none ||
+          _flightSpecial == ShotSpecial.rainbow) {
+        _attachFlyingBubble(snapOverride: _flightLanding);
+      } else {
+        _resolveSpecialShot();
+      }
       return;
     }
 
@@ -1065,6 +1135,20 @@ class GameEngine {
     debugPrint('ACTUAL $snap');
 
     bubbles.add(shot);
+
+    // Rainbow Bloom: the shot becomes a wildcard on the board.
+    if (_flightSpecial == ShotSpecial.rainbow) {
+      wildIds.add(shot.id);
+      boosterEffects.add(
+        BoosterEffect(
+          kind: ShotSpecial.rainbow,
+          x: snap.dx,
+          y: snap.dy,
+          radius: bubbleRadius * 2.4,
+        ),
+      );
+      _flightSpecial = ShotSpecial.none;
+    }
 
     flyingBubble = null;
     shooting = false;
@@ -1682,5 +1766,111 @@ class GameEngine {
     final int nextNumber = currentNumber + 1;
 
     startLevel(nextNumber);
+  }
+
+  // ============================================================
+  // BOOSTERS: Bloom Bomb / Flower Blast / Bloom Lightning
+  // (Rainbow Bloom is handled in _attachFlyingBubble)
+  // ============================================================
+
+  void _resolveSpecialShot() {
+    final ShotSpecial kind = _flightSpecial;
+    final Offset center = _flightLanding ?? _flightPath.last;
+
+    flyingBubble = null;
+    shooting = false;
+    _flightSpecial = ShotSpecial.none;
+
+    switch (kind) {
+      case ShotSpecial.bomb:
+        _burstAt(center, horizontalSpacing * 1.45, kind);
+      case ShotSpecial.flower:
+        _burstAt(center, horizontalSpacing * 2.6, kind);
+      case ShotSpecial.lightning:
+        _lightningStrike();
+      case ShotSpecial.rainbow:
+      case ShotSpecial.none:
+        break;
+    }
+  }
+
+  void _burstAt(Offset c, double radius, ShotSpecial kind) {
+    final List<Bubble> victims = bubbles
+        .where(
+          (b) =>
+              _isOnScreen(b) &&
+              _physicalDistance(b.x - c.dx, b.y - c.dy) <= radius,
+        )
+        .toList();
+
+    boosterEffects.add(
+      BoosterEffect(kind: kind, x: c.dx, y: c.dy, radius: radius),
+    );
+    _popVictims(victims);
+  }
+
+  void _lightningStrike() {
+    final double a = _aspect;
+    final double reach = bubbleRadius * 1.1;
+    final List<Bubble> victims = [];
+
+    for (final Bubble b in bubbles) {
+      if (!_isOnScreen(b)) continue;
+      final Offset p = Offset(b.x, b.y / a);
+      for (int i = 0; i < _flightPath.length - 1; i++) {
+        final Offset s = Offset(_flightPath[i].dx, _flightPath[i].dy / a);
+        final Offset e = Offset(
+          _flightPath[i + 1].dx,
+          _flightPath[i + 1].dy / a,
+        );
+        if (_distToSegment(p, s, e) <= reach) {
+          victims.add(b);
+          break;
+        }
+      }
+    }
+
+    boosterEffects.add(
+      BoosterEffect(
+        kind: ShotSpecial.lightning,
+        x: _flightPath.first.dx,
+        y: _flightPath.first.dy,
+        path: List<Offset>.from(_flightPath),
+      ),
+    );
+    _popVictims(victims);
+  }
+
+  double _distToSegment(Offset p, Offset a, Offset b) {
+    final Offset ab = b - a;
+    final double len2 = ab.dx * ab.dx + ab.dy * ab.dy;
+    if (len2 < 1e-12) return (p - a).distance;
+    final double t =
+        (((p.dx - a.dx) * ab.dx + (p.dy - a.dy) * ab.dy) / len2)
+            .clamp(0.0, 1.0)
+            .toDouble();
+    return (p - (a + ab * t)).distance;
+  }
+
+  void _popVictims(List<Bubble> victims) {
+    for (final Bubble v in victims) {
+      bubbles.removeWhere((x) => x.id == v.id);
+      final Color color = stoneIds.contains(v.id)
+          ? const Color(0xFF9AA1AD)
+          : v.color;
+      _forgetBubble(v.id);
+      score += 15;
+      _burst(v, color, v.letter);
+    }
+    _dropFloatingBubbles();
+    _requestScroll();
+  }
+
+  void _updateBoosterEffects() {
+    if (boosterEffects.isEmpty) return;
+    for (final BoosterEffect e in List<BoosterEffect>.from(boosterEffects)) {
+      e.progress += e.kind == ShotSpecial.lightning ? 0.06 : 0.03;
+      if (e.progress >= 1) boosterEffects.remove(e);
+    }
   }
 }
