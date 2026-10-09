@@ -1007,34 +1007,51 @@ class _ToastPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      padding: const EdgeInsets.fromLTRB(8, 8, 18, 8),
       decoration: BoxDecoration(
-        color: const Color(0xFF292929).withValues(alpha: 0.90),
-        borderRadius: BorderRadius.circular(20),
+        gradient: const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFFFFFFFF), Color(0xFFFFEAF3)],
+        ),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFFFFB6D3), width: 2),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.18),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
+            color: const Color(0xFFFF4D96).withValues(alpha: 0.28),
+            blurRadius: 14,
+            offset: const Offset(0, 5),
           ),
         ],
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(
-            Icons.info_outline_rounded,
-            size: 18,
-            color: Color(0xFFFFD23F),
+          Container(
+            width: 26,
+            height: 26,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0xFFFF9BC4), Color(0xFFFF4D96)],
+              ),
+            ),
+            child: const Icon(
+              Icons.priority_high_rounded,
+              size: 17,
+              color: Colors.white,
+            ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           Flexible(
             child: Text(
               text,
               style: const TextStyle(
-                color: Colors.white,
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
+                color: Color(0xFF6B3A55),
+                fontSize: 13.5,
+                fontWeight: FontWeight.w800,
               ),
             ),
           ),
@@ -1278,7 +1295,10 @@ class _TopBar extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 10),
             child: Center(
               child: ConstrainedBox(
-                constraints: const BoxConstraints(minWidth: 58),
+                // Fixed minimum width: the score box must NOT change size
+                // when the score changes, otherwise the level bar next to it
+                // gets a few px wider/narrower and the fill "jumps".
+                constraints: const BoxConstraints(minWidth: 82),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -3244,6 +3264,20 @@ class _LevelCompleteOverlayState extends State<_LevelCompleteOverlay>
   double _seg(double a, double b) =>
       ((_intro.value - a) / (b - a)).clamp(0.0, 1.0);
 
+  /// Tiny 5-petal flower used as the confetti particle.
+  static Path _flowerPath(Size size) {
+    final double r = min(size.width, size.height) / 2;
+    final Offset c = Offset(size.width / 2, size.height / 2);
+    final Path path = Path();
+    for (int i = 0; i < 5; i++) {
+      final double a = 2 * pi * i / 5 - pi / 2;
+      final Offset p = c + Offset(cos(a), sin(a)) * (r * 0.55);
+      path.addOval(Rect.fromCircle(center: p, radius: r * 0.45));
+    }
+    path.addOval(Rect.fromCircle(center: c, radius: r * 0.3));
+    return path;
+  }
+
   Color _wordColor(String word) {
     if (word.isEmpty) return const Color(0xFFFF72B6);
     return widget.letterColors[word[0].toUpperCase()] ??
@@ -3258,29 +3292,6 @@ class _LevelCompleteOverlayState extends State<_LevelCompleteOverlay>
       children: [
         // Dark backdrop
         Container(color: Colors.black.withValues(alpha: 0.58)),
-
-        // Confetti
-        Positioned.fill(
-          child: IgnorePointer(
-            child: ConfettiWidget(
-              confettiController: widget.confettiController,
-              blastDirectionality: BlastDirectionality.explosive,
-              shouldLoop: false,
-              numberOfParticles: 42,
-              gravity: 0.20,
-              emissionFrequency: 0.035,
-              maxBlastForce: 28,
-              minBlastForce: 10,
-              colors: const [
-                Color(0xFFFF72B6),
-                Color(0xFFFFC857),
-                Color(0xFF8ED8FF),
-                Color(0xFFB9EFA5),
-                Color(0xFFC9A7FF),
-              ],
-            ),
-          ),
-        ),
 
         SafeArea(
           child: Center(
@@ -3317,7 +3328,10 @@ class _LevelCompleteOverlayState extends State<_LevelCompleteOverlay>
                               colors: [Color(0xFFFFEAF3), Color(0xFFFFD9E8)],
                             ),
                             borderRadius: BorderRadius.circular(36),
-                            border: Border.all(color: Colors.white, width: 4),
+                            border: Border.all(
+                              color: const Color(0xFFFF9BC4),
+                              width: 3,
+                            ),
                             boxShadow: [
                               BoxShadow(
                                 color: const Color(
@@ -3451,6 +3465,33 @@ class _LevelCompleteOverlayState extends State<_LevelCompleteOverlay>
                   },
                 ),
               ),
+            ),
+          ),
+        ),
+
+        // Confetti - drawn AFTER the card so it falls in FRONT of it.
+        Positioned.fill(
+          child: IgnorePointer(
+            child: ConfettiWidget(
+              confettiController: widget.confettiController,
+              blastDirectionality: BlastDirectionality.explosive,
+              shouldLoop: false,
+              numberOfParticles: 30,
+              gravity: 0.14,
+              emissionFrequency: 0.03,
+              maxBlastForce: 24,
+              minBlastForce: 8,
+              minimumSize: const Size(9, 9),
+              maximumSize: const Size(15, 15),
+              createParticlePath: _flowerPath,
+              colors: const [
+                Color(0xFFFF72B6),
+                Color(0xFFFF9BC4),
+                Color(0xFFFFB3D4),
+                Color(0xFFFFD4E5),
+                Color(0xFFFFC857),
+                Color(0xFFC9A7FF),
+              ],
             ),
           ),
         ),
@@ -4122,72 +4163,155 @@ class _GameOverOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    const Color plum = Color(0xFF6B3A55);
+
     return Container(
-      color: Colors.black.withValues(alpha: 0.34),
-      child: Center(
-        child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 28),
-          padding: const EdgeInsets.all(30),
-          decoration: BoxDecoration(
-            color: const Color(0xFFFFFDF9),
-            borderRadius: BorderRadius.circular(30),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.16),
-                blurRadius: 30,
-                offset: const Offset(0, 12),
-              ),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('🌸', style: TextStyle(fontSize: 48)),
-              const SizedBox(height: 8),
-              const Text(
-                'TRY AGAIN',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 26,
-                  fontWeight: FontWeight.w900,
-                  color: Color(0xFF292929),
-                  letterSpacing: 1,
-                ),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                message,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.black.withValues(alpha: 0.58),
-                  height: 1.4,
-                ),
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: ElevatedButton(
-                  onPressed: onPressed,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF292929),
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(18),
+      color: Colors.black.withValues(alpha: 0.55),
+      child: SafeArea(
+        child: Center(
+          child: TweenAnimationBuilder<double>(
+            tween: Tween<double>(begin: 0, end: 1),
+            duration: const Duration(milliseconds: 450),
+            curve: Curves.easeOutBack,
+            builder: (context, t, child) => Opacity(
+              opacity: t.clamp(0.0, 1.0),
+              child: Transform.scale(scale: 0.8 + 0.2 * t, child: child),
+            ),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 360),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 28),
+                child: Container(
+                  width: double.infinity,
+                  clipBehavior: Clip.antiAlias,
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Color(0xFFFFEAF3), Color(0xFFFFD9E8)],
                     ),
-                  ),
-                  child: const Text(
-                    'RETRY',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1,
+                    borderRadius: BorderRadius.circular(36),
+                    border: Border.all(
+                      color: const Color(0xFFFF9BC4),
+                      width: 3,
                     ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFFFF4D96).withValues(alpha: 0.40),
+                        blurRadius: 30,
+                        offset: const Offset(0, 14),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // ---- PINK HEADER: badge + TRY AGAIN ----
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.fromLTRB(16, 24, 16, 20),
+                        decoration: const BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [Color(0xFFFF9BC4), Color(0xFFFF4D96)],
+                          ),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 76,
+                              height: 76,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Colors.white.withValues(alpha: 0.22),
+                              ),
+                              child: const Icon(
+                                Icons.sentiment_dissatisfied_rounded,
+                                color: Colors.white,
+                                size: 46,
+                                shadows: [
+                                  Shadow(color: Colors.black26, blurRadius: 6),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  Text(
+                                    'TRY AGAIN',
+                                    style: TextStyle(
+                                      fontSize: 40,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 1.5,
+                                      foreground: Paint()
+                                        ..style = PaintingStyle.stroke
+                                        ..strokeWidth = 10
+                                        ..strokeJoin = StrokeJoin.round
+                                        ..color = const Color(0xFFE0287F),
+                                    ),
+                                  ),
+                                  Text(
+                                    'TRY AGAIN',
+                                    style: TextStyle(
+                                      fontSize: 40,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 1.5,
+                                      color: Colors.white,
+                                      shadows: [
+                                        Shadow(
+                                          color: Colors.black.withValues(
+                                            alpha: 0.22,
+                                          ),
+                                          blurRadius: 6,
+                                          offset: const Offset(0, 4),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      // ---- BODY: message + RETRY ----
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 20, 20, 22),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              message,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w800,
+                                height: 1.35,
+                                color: plum.withValues(alpha: 0.85),
+                              ),
+                            ),
+                            const SizedBox(height: 22),
+                            _PauseButton3D(
+                              label: 'RETRY',
+                              icon: Icons.refresh_rounded,
+                              primary: true,
+                              height: 56,
+                              onTap: onPressed,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
-            ],
+            ),
           ),
         ),
       ),
