@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'booster_service.dart';
 
 const Color _plum = Color(0xFF6B3A55);
+const Color _plumDark = Color(0xFF4A1F38);
 const Color _rose = Color(0xFFFF4D96);
 const Color _roseDeep = Color(0xFFE0287F);
 
@@ -37,27 +38,23 @@ class BoosterBar extends StatelessWidget {
           return Container(
             padding: const EdgeInsets.fromLTRB(4, 13, 4, 8),
             decoration: BoxDecoration(
+              // Deeper pink -> purple so the bar stands out from the screen.
               gradient: const LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
-                  Color(0xFFFFE6F1),
-                  Color(0xFFFFCDE2),
-                  Color(0xFFEBD6FF),
+                  Color(0xFFFFB3D6),
+                  Color(0xFFFF8FC2),
+                  Color(0xFFC49BF2),
                 ],
               ),
               borderRadius: BorderRadius.circular(34),
               border: Border.all(color: Colors.white, width: 3),
               boxShadow: [
                 BoxShadow(
-                  color: _roseDeep.withValues(alpha: 0.26),
+                  color: _roseDeep.withValues(alpha: 0.38),
                   blurRadius: 22,
                   offset: const Offset(0, 8),
-                ),
-                BoxShadow(
-                  color: const Color(0xFF9CC4FF).withValues(alpha: 0.22),
-                  blurRadius: 14,
-                  offset: const Offset(0, 2),
                 ),
               ],
             ),
@@ -145,6 +142,48 @@ String _shortName(BoosterId id) {
   }
 }
 
+/// Each booster gets its own saturated colour so they read clearly
+/// against the pink bar.
+class _Tint {
+  final Color mid, deep, glow;
+  const _Tint(this.mid, this.deep, this.glow);
+}
+
+_Tint _tintFor(BoosterId id) {
+  switch (id) {
+    case BoosterId.bloomSwap:
+      return const _Tint(
+        Color(0xFFBFDDFF),
+        Color(0xFF6FA8FF),
+        Color(0xFF3F86E6),
+      );
+    case BoosterId.bloomBomb:
+      return const _Tint(
+        Color(0xFFFFA3C8),
+        Color(0xFFFF4D96),
+        Color(0xFFE0287F),
+      );
+    case BoosterId.rainbowBloom:
+      return const _Tint(
+        Color(0xFFE3D4FF),
+        Color(0xFFB894FF),
+        Color(0xFF8A62D8),
+      );
+    case BoosterId.bloomLightning:
+      return const _Tint(
+        Color(0xFFBBD3FF),
+        Color(0xFF6F8CFF),
+        Color(0xFF4F6BE8),
+      );
+    case BoosterId.flowerBlast:
+      return const _Tint(
+        Color(0xFFFFC9A8),
+        Color(0xFFFF8A5C),
+        Color(0xFFFF7A59),
+      );
+  }
+}
+
 class _BoosterSlot extends StatefulWidget {
   final BoosterDef def;
   final double size;
@@ -201,19 +240,31 @@ class _BoosterSlotState extends State<_BoosterSlot>
   Widget build(BuildContext context) {
     final bool usable = widget.unlocked && widget.qty > 0;
     final double s = widget.size;
+    final _Tint tint = _tintFor(widget.def.id);
 
     Widget icon = SizedBox.expand(
       child: CustomPaint(painter: BoosterIconPainter(widget.def.id)),
     );
     if (!usable) {
+      // dimmed, but still clearly coloured (not washed out)
       icon = Opacity(
-        opacity: widget.unlocked ? 0.62 : 0.50,
+        opacity: widget.unlocked ? 0.85 : 0.50,
         child: ColorFiltered(
-          colorFilter: _saturation(widget.unlocked ? 0.35 : 0.12),
+          colorFilter: _saturation(widget.unlocked ? 0.70 : 0.12),
           child: icon,
         ),
       );
     }
+
+    final List<Color> orbColors = usable
+        ? [Colors.white, tint.mid, tint.deep]
+        : widget.unlocked
+        ? [
+            Colors.white,
+            Color.lerp(tint.mid, const Color(0xFFEDE6EB), 0.40)!,
+            Color.lerp(tint.deep, const Color(0xFFD9CCD5), 0.45)!,
+          ]
+        : const [Color(0xFFFBF6F9), Color(0xFFE9DEE5), Color(0xFFD2C4CD)];
 
     final String label = widget.unlocked
         ? _shortName(widget.def.id)
@@ -249,35 +300,25 @@ class _BoosterSlotState extends State<_BoosterSlot>
                           gradient: RadialGradient(
                             center: const Alignment(-0.3, -0.45),
                             radius: 1.0,
-                            colors: usable
-                                ? const [
-                                    Colors.white,
-                                    Color(0xFFFFEAF3),
-                                    Color(0xFFFFCDE2),
-                                  ]
-                                : const [
-                                    Color(0xFFFBF6F9),
-                                    Color(0xFFF1E8EE),
-                                    Color(0xFFE6DAE2),
-                                  ],
-                            stops: const [0.0, 0.55, 1.0],
+                            colors: orbColors,
+                            stops: const [0.0, 0.6, 1.0],
                           ),
                           border: Border.all(
-                            color: widget.armed ? _rose : Colors.white,
-                            width: widget.armed ? 3.5 : 2.5,
+                            color: Colors.white,
+                            width: widget.armed ? 4 : 3,
                           ),
                           boxShadow: [
                             if (widget.armed)
                               BoxShadow(
-                                color: _rose.withValues(alpha: 0.55),
-                                blurRadius: 16,
-                                spreadRadius: 2,
+                                color: tint.glow.withValues(alpha: 0.75),
+                                blurRadius: 18,
+                                spreadRadius: 3,
                               ),
                             BoxShadow(
-                              color: (usable ? _rose : _plum).withValues(
-                                alpha: usable ? 0.30 : 0.08,
+                              color: (usable ? tint.glow : _plum).withValues(
+                                alpha: usable ? 0.50 : 0.15,
                               ),
-                              blurRadius: usable ? 12 : 6,
+                              blurRadius: usable ? 14 : 6,
                               offset: const Offset(0, 4),
                             ),
                           ],
@@ -364,13 +405,18 @@ class _BoosterSlotState extends State<_BoosterSlot>
                 overflow: TextOverflow.fade,
                 softWrap: false,
                 style: TextStyle(
-                  fontSize: 10,
+                  fontSize: 10.5,
                   height: 1.1,
                   fontWeight: FontWeight.w900,
-                  letterSpacing: 0.3,
+                  letterSpacing: 0.2,
                   color: usable
-                      ? _plum
-                      : _plum.withValues(alpha: widget.unlocked ? 0.55 : 0.45),
+                      ? _plumDark
+                      : _plumDark.withValues(
+                          alpha: widget.unlocked ? 0.75 : 0.55,
+                        ),
+                  shadows: const [
+                    Shadow(color: Colors.white54, blurRadius: 3),
+                  ],
                 ),
               ),
             ],
@@ -382,23 +428,23 @@ class _BoosterSlotState extends State<_BoosterSlot>
 
   Widget _qtyBadge(bool usable) {
     return Container(
-      constraints: const BoxConstraints(minWidth: 22),
-      height: 22,
+      constraints: const BoxConstraints(minWidth: 24),
+      height: 24,
       padding: const EdgeInsets.symmetric(horizontal: 5),
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(11),
+        borderRadius: BorderRadius.circular(12),
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: usable
               ? const [Color(0xFFFF9BC4), _roseDeep]
-              : const [Color(0xFFD3C3CD), Color(0xFFB4A0AD)],
+              : const [Color(0xFFA68A9B), Color(0xFF86697B)],
         ),
         border: Border.all(color: Colors.white, width: 2),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.12),
+            color: Colors.black.withValues(alpha: 0.15),
             blurRadius: 4,
             offset: const Offset(0, 2),
           ),
@@ -408,7 +454,7 @@ class _BoosterSlotState extends State<_BoosterSlot>
         '${widget.qty}',
         style: const TextStyle(
           color: Colors.white,
-          fontSize: 12,
+          fontSize: 13,
           fontWeight: FontWeight.w900,
           height: 1.0,
         ),

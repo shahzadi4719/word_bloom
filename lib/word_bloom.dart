@@ -407,9 +407,14 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                       if (_isPaused) return;
                       setState(() => _isAiming = false);
                     },
+                    // FIX: every child of this Stack has a stable key, so when
+                    // conditional widgets (aim line, toast, praise ...) appear
+                    // or disappear, the top bar / launcher keep their state
+                    // and the star bar no longer restarts from zero.
                     child: Stack(
                       children: [
                         Positioned.fill(
+                          key: const ValueKey('bg'),
                           child: Container(
                             decoration: const BoxDecoration(
                               gradient: LinearGradient(
@@ -423,6 +428,7 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
 
                         // GAME BOARD (board bubbles + bubbles that are falling off)
                         Positioned.fill(
+                          key: const ValueKey('board'),
                           child: AnimatedBuilder(
                             animation: Listenable.merge([
                               _entranceController,
@@ -453,13 +459,17 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
 
                         // BUBBLE POP EFFECT
                         Positioned.fill(
+                          key: const ValueKey('pops'),
                           child: CustomPaint(
-                            painter: _FlyingPopPainter(pops: _engine.flyingPops),
+                            painter: _FlyingPopPainter(
+                              pops: _engine.flyingPops,
+                            ),
                           ),
                         ),
 
                         // BOOSTER EFFECTS (glow, petals, lightning beam)
                         Positioned.fill(
+                          key: const ValueKey('booster_fx'),
                           child: IgnorePointer(
                             child: CustomPaint(
                               painter: _BoosterEffectPainter(
@@ -476,6 +486,7 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                             !_engine.levelComplete &&
                             !_engine.shooting)
                           Positioned.fill(
+                            key: const ValueKey('aim_line'),
                             child: CustomPaint(
                               painter: _AimingLinePainter(
                                 points: _engine
@@ -499,6 +510,7 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
 
                         // SOLID HEADER band (hides board bubbles behind the top bar)
                         Positioned(
+                          key: const ValueKey('header_band'),
                           top: 0,
                           left: 0,
                           right: 0,
@@ -523,6 +535,7 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
 
                         // TOP UI: pause | level + star progress | score
                         Positioned(
+                          key: const ValueKey('top_bar'),
                           top: 12,
                           left: 14,
                           right: 14,
@@ -536,6 +549,7 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
 
                         // BUBBLE LAUNCHER RING
                         Positioned(
+                          key: const ValueKey('launcher'),
                           left: 0,
                           right: 0,
                           bottom: 0,
@@ -560,6 +574,7 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
 
                         // LEFTOVER SHOTS flying out of the ring after a win
                         Positioned.fill(
+                          key: const ValueKey('bonus_shots'),
                           child: IgnorePointer(
                             child: CustomPaint(
                               painter: _BonusShotPainter(
@@ -570,45 +585,39 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                           ),
                         ),
 
-                        // STATUS CHIPS: words goal (+ letter rule), timer, board drop
+                        // WORD GOAL + OPTIONAL TIMER
                         Positioned(
+                          key: const ValueKey('word_goal'),
                           top: 68,
                           left: 14,
                           right: 14,
                           child: IgnorePointer(
-                            child: Wrap(
-                              alignment: WrapAlignment.center,
-                              spacing: 10,
-                              runSpacing: 8,
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                _InfoChip(
-                                  icon: Icons.flag_rounded,
-                                  text:
-                                      'Words ${_engine.completedWords.length}/${_engine.currentLevel?.words.length ?? 1} · ${_engine.lengthRuleText}',
-                                  color: const Color(0xFFFF4D96),
+                                _WordGoalChip(
+                                  completed: _engine.completedWords.length,
+                                  total:
+                                      _engine.currentLevel?.words.length ?? 1,
                                 ),
-                                if (_engine.timeLimit > 0)
+                                if (_engine.timeLimit > 0) ...[
+                                  const SizedBox(width: 8),
                                   _InfoChip(
                                     icon: Icons.timer_rounded,
                                     text: _formatTime(_engine.timeLeft),
                                     color: _engine.timeLeft <= 10
                                         ? const Color(0xFFE0554C)
-                                        : const Color(0xFF292929),
+                                        : const Color(0xFF7A4A3A),
                                   ),
-                                if (_engine.shotsUntilDescend > 0)
-                                  _InfoChip(
-                                    icon: Icons.south_rounded,
-                                    text: 'Drops in ${_engine.shotsUntilDescend}',
-                                    color: _engine.shotsUntilDescend <= 3
-                                        ? const Color(0xFFE0554C)
-                                        : const Color(0xFFF2A93B),
-                                  ),
-                                if (_armed != null)
+                                ],
+                                if (_armed != null) ...[
+                                  const SizedBox(width: 8),
                                   _InfoChip(
                                     icon: Icons.auto_awesome,
                                     text: '${boosterDef(_armed!).name} ready',
                                     color: const Color(0xFFE0287F),
                                   ),
+                                ],
                               ],
                             ),
                           ),
@@ -617,6 +626,7 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                         // TOAST: why a word didn't count
                         if (_engine.toastMessage != null)
                           Positioned(
+                            key: const ValueKey('toast'),
                             top: 118,
                             left: 24,
                             right: 24,
@@ -630,6 +640,7 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                         // FOUND WORD
                         if (_engine.foundWord != null)
                           Positioned(
+                            key: const ValueKey('found_word'),
                             top: 150,
                             left: 0,
                             right: 0,
@@ -642,9 +653,10 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                             ),
                           ),
 
-                        // NEW: PRAISE ("Nice!", "Great!" ...)
+                        // PRAISE ("Nice!", "Great!" ...)
                         if (_praise != null)
                           Positioned.fill(
+                            key: const ValueKey('praise_slot'),
                             child: IgnorePointer(
                               child: Align(
                                 alignment: const Alignment(0, -0.2),
@@ -659,6 +671,7 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                         // GAME OVER
                         if (_engine.gameOver)
                           Positioned.fill(
+                            key: const ValueKey('game_over'),
                             child: _GameOverOverlay(
                               onPressed: _restartAndRetry,
                               message: _engine.timeUp
@@ -670,6 +683,7 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                         // LEVEL COMPLETE
                         if (_engine.levelComplete)
                           Positioned.fill(
+                            key: const ValueKey('level_complete'),
                             child: _LevelCompleteOverlay(
                               confettiController: _confettiController,
                               score: _engine.score,
@@ -682,6 +696,7 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                         // FIRST-SHOT TUTORIAL
                         if (_showTutorial)
                           Positioned.fill(
+                            key: const ValueKey('tutorial'),
                             child: IgnorePointer(
                               ignoring: true,
                               child: _TutorialOverlay(),
@@ -695,11 +710,7 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
             ),
 
             // BOOSTER BAR - below the game area, never over the shooter.
-            BoosterBar(
-              service: _boosters,
-              armed: _armed,
-              onTap: _onBoosterTap,
-            ),
+            BoosterBar(service: _boosters, armed: _armed, onTap: _onBoosterTap),
           ],
         ),
       ),
@@ -823,6 +834,113 @@ class _TutorialOverlayState extends State<_TutorialOverlay>
   }
 }
 
+class _WordGoalChip extends StatelessWidget {
+  final int completed;
+  final int total;
+
+  const _WordGoalChip({required this.completed, required this.total});
+
+  @override
+  Widget build(BuildContext context) {
+    final int safeTotal = total <= 0 ? 1 : total;
+    final int safeCompleted = completed.clamp(0, safeTotal);
+    final double progress = safeCompleted / safeTotal;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(9, 7, 12, 7),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: const Color(0xFFFFD4E5), width: 1.4),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFFF4D96).withValues(alpha: 0.16),
+            blurRadius: 12,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 29,
+            height: 29,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFFFFA9CD), Color(0xFFFF4D96)],
+              ),
+            ),
+            child: const Icon(
+              Icons.auto_awesome_rounded,
+              color: Colors.white,
+              size: 16,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'WORDS',
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.15,
+                      color: Color(0xFF8B6170),
+                    ),
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    '$safeCompleted / $safeTotal',
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w900,
+                      color: Color(0xFFE0287F),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              SizedBox(
+                width: 112,
+                height: 5,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Container(color: const Color(0xFFFFE5EF)),
+                      FractionallySizedBox(
+                        alignment: Alignment.centerLeft,
+                        widthFactor: progress,
+                        child: Container(
+                          decoration: const BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [Color(0xFFFFA9CD), Color(0xFFFF4D96)],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _InfoChip extends StatelessWidget {
   final IconData icon;
   final String text;
@@ -928,7 +1046,6 @@ class _ToastPill extends StatelessWidget {
 
 // ================================================================
 // TOP BAR: round pause button | level + star progress | score
-// Same glass pills as the home screen.
 // The progress fill only ever moves forward (see _shownProgress).
 // ================================================================
 
@@ -994,8 +1111,12 @@ class _TopBar extends StatelessWidget {
                             child: LayoutBuilder(
                               builder: (context, c) {
                                 final double w = c.maxWidth;
+                                // FIX: begin == end, so even if this widget is
+                                // ever rebuilt from scratch it starts AT the
+                                // current progress instead of zero. Later value
+                                // changes still animate smoothly (current -> new).
                                 return TweenAnimationBuilder<double>(
-                                  tween: Tween<double>(begin: 0, end: p),
+                                  tween: Tween<double>(begin: p, end: p),
                                   duration: const Duration(milliseconds: 650),
                                   curve: Curves.easeOutCubic,
                                   builder: (context, v, _) {
@@ -1067,7 +1188,10 @@ class _TopBar extends StatelessWidget {
                                         // glowing head of the fill
                                         if (v > 0.02)
                                           Positioned(
-                                            left: (w * v - 7).clamp(0.0, w - 14),
+                                            left: (w * v - 7).clamp(
+                                              0.0,
+                                              w - 14,
+                                            ),
                                             top: 5,
                                             child: Container(
                                               width: 14,
@@ -1281,7 +1405,7 @@ class _PauseButtonState extends State<_PauseButton> {
 }
 
 // ================================================================
-// PRAISE POPUP (NEW): "Nice!", "Great!" ... when a word is completed
+// PRAISE POPUP: "Nice!", "Great!" ... when a word is completed
 // ================================================================
 
 class _PraisePopup extends StatelessWidget {
@@ -3060,6 +3184,649 @@ class _LauncherRingState extends State<_LauncherRing>
 }
 
 // ================================================================
+// LEVEL COMPLETE: ONE pink card holding YOU WIN! + stars (pink
+// header), score, found words and the NEXT LEVEL button.
+// ================================================================
+
+class _LevelCompleteOverlay extends StatefulWidget {
+  final ConfettiController confettiController;
+  final int score;
+  final int stars;
+  final List<String> completedWords;
+  final Map<String, Color> letterColors;
+  final VoidCallback onPressed;
+
+  const _LevelCompleteOverlay({
+    required this.confettiController,
+    required this.score,
+    required this.stars,
+    required this.completedWords,
+    required this.letterColors,
+    required this.onPressed,
+  });
+
+  @override
+  State<_LevelCompleteOverlay> createState() => _LevelCompleteOverlayState();
+}
+
+class _LevelCompleteOverlayState extends State<_LevelCompleteOverlay>
+    with TickerProviderStateMixin {
+  late final AnimationController _intro;
+  late final AnimationController _loop;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _intro = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2600),
+    )..forward();
+
+    _loop = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2200),
+    )..repeat(reverse: true);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.confettiController.play();
+    });
+  }
+
+  @override
+  void dispose() {
+    _intro.dispose();
+    _loop.dispose();
+    super.dispose();
+  }
+
+  /// 0..1 progress of the intro between [a] and [b] (fractions of the intro).
+  double _seg(double a, double b) =>
+      ((_intro.value - a) / (b - a)).clamp(0.0, 1.0);
+
+  Color _wordColor(String word) {
+    if (word.isEmpty) return const Color(0xFFFF72B6);
+    return widget.letterColors[word[0].toUpperCase()] ??
+        const Color(0xFFFF72B6);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const Color plum = Color(0xFF6B3A55);
+
+    return Stack(
+      children: [
+        // Dark backdrop
+        Container(color: Colors.black.withValues(alpha: 0.58)),
+
+        // Confetti
+        Positioned.fill(
+          child: IgnorePointer(
+            child: ConfettiWidget(
+              confettiController: widget.confettiController,
+              blastDirectionality: BlastDirectionality.explosive,
+              shouldLoop: false,
+              numberOfParticles: 42,
+              gravity: 0.20,
+              emissionFrequency: 0.035,
+              maxBlastForce: 28,
+              minBlastForce: 10,
+              colors: const [
+                Color(0xFFFF72B6),
+                Color(0xFFFFC857),
+                Color(0xFF8ED8FF),
+                Color(0xFFB9EFA5),
+                Color(0xFFC9A7FF),
+              ],
+            ),
+          ),
+        ),
+
+        SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 380),
+                child: AnimatedBuilder(
+                  animation: Listenable.merge([_intro, _loop]),
+                  builder: (context, _) {
+                    final double cardT = Curves.easeOutBack.transform(
+                      _seg(0.0, 0.14),
+                    );
+                    final double titleT = _seg(0.04, 0.30);
+                    final double scoreT = Curves.easeOutCubic.transform(
+                      _seg(0.30, 0.46),
+                    );
+                    final double btnT = Curves.easeOut.transform(
+                      _seg(0.68, 0.86),
+                    );
+                    final double float = sin(_loop.value * pi) * 4;
+
+                    return Opacity(
+                      opacity: cardT.clamp(0.0, 1.0),
+                      child: Transform.scale(
+                        scale: 0.8 + 0.2 * cardT,
+                        child: Container(
+                          width: double.infinity,
+                          clipBehavior: Clip.antiAlias,
+                          decoration: BoxDecoration(
+                            gradient: const LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [Color(0xFFFFEAF3), Color(0xFFFFD9E8)],
+                            ),
+                            borderRadius: BorderRadius.circular(36),
+                            border: Border.all(color: Colors.white, width: 4),
+                            boxShadow: [
+                              BoxShadow(
+                                color: const Color(
+                                  0xFFFF4D96,
+                                ).withValues(alpha: 0.40),
+                                blurRadius: 30,
+                                offset: const Offset(0, 14),
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              // ---- PINK HEADER: YOU WIN! + STARS ----
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.fromLTRB(
+                                  16,
+                                  24,
+                                  16,
+                                  20,
+                                ),
+                                decoration: const BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                    colors: [
+                                      Color(0xFFFF9BC4),
+                                      Color(0xFFFF4D96),
+                                    ],
+                                  ),
+                                ),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Transform.translate(
+                                      offset: Offset(0, float),
+                                      child: Transform.scale(
+                                        scale: Curves.elasticOut
+                                            .transform(titleT)
+                                            .clamp(0.0, 1.4),
+                                        child: const FittedBox(
+                                          fit: BoxFit.scaleDown,
+                                          child: _WinTitle(),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 14),
+                                    _WinStars(
+                                      stars: widget.stars,
+                                      progress: _seg(0.20, 0.52),
+                                    ),
+                                  ],
+                                ),
+                              ),
+
+                              // ---- BODY: SCORE + WORDS + BUTTON ----
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  18,
+                                  18,
+                                  18,
+                                  20,
+                                ),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Opacity(
+                                      opacity: scoreT.clamp(0.0, 1.0),
+                                      child: Transform.translate(
+                                        offset: Offset(0, 12 * (1 - scoreT)),
+                                        child: _WinScorePill(
+                                          score: widget.score,
+                                        ),
+                                      ),
+                                    ),
+
+                                    if (widget.completedWords.isNotEmpty) ...[
+                                      const SizedBox(height: 18),
+                                      Text(
+                                        'WORDS FOUND',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w900,
+                                          letterSpacing: 1.4,
+                                          color: plum.withValues(alpha: 0.65),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 10),
+                                      Wrap(
+                                        alignment: WrapAlignment.center,
+                                        spacing: 8,
+                                        runSpacing: 8,
+                                        children: List.generate(
+                                          widget.completedWords.length,
+                                          (i) {
+                                            final String w =
+                                                widget.completedWords[i];
+                                            return _WinWordChip(
+                                              key: ValueKey('win_word_$i'),
+                                              word: w,
+                                              color: _wordColor(w),
+                                              delay: 700 + i * 240,
+                                            );
+                                          },
+                                        ),
+                                      ),
+                                    ],
+
+                                    const SizedBox(height: 22),
+                                    Opacity(
+                                      opacity: btnT,
+                                      child: Transform.translate(
+                                        offset: Offset(0, 20 * (1 - btnT)),
+                                        child: IgnorePointer(
+                                          ignoring: btnT < 0.6,
+                                          child: _NextLevelButton(
+                                            onPressed: widget.onPressed,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Score pill: star badge + counting-up number.
+class _WinScorePill extends StatelessWidget {
+  final int score;
+  const _WinScorePill({required this.score});
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0, end: score.toDouble()),
+      duration: const Duration(milliseconds: 1400),
+      curve: Curves.easeOutCubic,
+      builder: (context, v, _) {
+        return Container(
+          padding: const EdgeInsets.fromLTRB(8, 7, 20, 7),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.96),
+            borderRadius: BorderRadius.circular(30),
+            border: Border.all(color: const Color(0xFFFFD4E5), width: 2),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFFFF4D96).withValues(alpha: 0.35),
+                blurRadius: 18,
+                offset: const Offset(0, 5),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const _BadgeIcon(
+                icon: Icons.star_rounded,
+                colors: [Color(0xFFFFD76A), Color(0xFFFFA726)],
+              ),
+              const SizedBox(width: 10),
+              Text(
+                '${v.round()}',
+                style: const TextStyle(
+                  fontSize: 26,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.5,
+                  color: Color(0xFFE0287F),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Big outlined "YOU WIN!" text.
+class _WinTitle extends StatelessWidget {
+  const _WinTitle();
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        Text(
+          'YOU WIN!',
+          style: TextStyle(
+            fontSize: 58,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 2,
+            foreground: Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 14
+              ..strokeJoin = StrokeJoin.round
+              ..color = const Color(0xFFE0287F),
+          ),
+        ),
+        Text(
+          'YOU WIN!',
+          style: TextStyle(
+            fontSize: 58,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 2,
+            color: Colors.white,
+            shadows: [
+              Shadow(
+                color: Colors.black.withValues(alpha: 0.25),
+                blurRadius: 8,
+                offset: const Offset(0, 5),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 3 stars that pop in one after another.
+class _WinStars extends StatelessWidget {
+  final int stars;
+
+  /// 0..1 progress of the whole star animation.
+  final double progress;
+
+  const _WinStars({required this.stars, required this.progress});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: List.generate(3, (i) {
+        final bool filled = i < stars;
+        final double start = i * 0.28;
+        final double local = ((progress - start) / 0.44).clamp(0.0, 1.0);
+        final double scale = Curves.elasticOut.transform(local);
+        final double size = i == 1 ? 64 : 52;
+
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 5),
+          child: Transform.scale(
+            scale: scale,
+            child: Icon(
+              Icons.star_rounded,
+              size: size,
+              color: filled
+                  ? const Color(0xFFFFC62E)
+                  : Colors.white.withValues(alpha: 0.30),
+              shadows: filled
+                  ? const [
+                      Shadow(color: Color(0xFFFFE08A), blurRadius: 16),
+                      Shadow(color: Colors.black26, blurRadius: 4),
+                    ]
+                  : null,
+            ),
+          ),
+        );
+      }),
+    );
+  }
+}
+
+/// One found word: pops in with a bounce, check badge in its letter colour.
+class _WinWordChip extends StatefulWidget {
+  final String word;
+  final Color color;
+  final int delay;
+
+  const _WinWordChip({
+    super.key,
+    required this.word,
+    required this.color,
+    required this.delay,
+  });
+
+  @override
+  State<_WinWordChip> createState() => _WinWordChipState();
+}
+
+class _WinWordChipState extends State<_WinWordChip>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c;
+
+  @override
+  void initState() {
+    super.initState();
+    _c = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 520),
+    );
+    Future.delayed(Duration(milliseconds: widget.delay), () {
+      if (mounted) _c.forward();
+    });
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (context, child) {
+        final double pop = Curves.easeOutBack.transform(_c.value);
+        return Opacity(
+          opacity: Curves.easeOut.transform(_c.value.clamp(0.0, 1.0)),
+          child: Transform.translate(
+            offset: Offset(0, 22 * (1 - pop)),
+            child: Transform.scale(scale: 0.6 + 0.4 * pop, child: child),
+          ),
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(8, 8, 16, 8),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(
+            color: widget.color.withValues(alpha: 0.55),
+            width: 2,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: widget.color.withValues(alpha: 0.40),
+              blurRadius: 14,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 24,
+              height: 24,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: widget.color,
+              ),
+              child: const Icon(
+                Icons.check_rounded,
+                size: 16,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              widget.word,
+              style: const TextStyle(
+                fontSize: 19,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1.2,
+                color: Color(0xFF3B2A33),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ================================================================
+// NEXT LEVEL BUTTON
+// ================================================================
+
+class _NextLevelButton extends StatefulWidget {
+  final VoidCallback onPressed;
+
+  const _NextLevelButton({required this.onPressed});
+
+  @override
+  State<_NextLevelButton> createState() => _NextLevelButtonState();
+}
+
+class _NextLevelButtonState extends State<_NextLevelButton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1700),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        final double pulse = Curves.easeInOut.transform(_controller.value);
+
+        return Transform.scale(
+          scale: 1.0 + (pulse * 0.018),
+          child: Container(
+            width: double.infinity,
+            height: 56,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(28),
+              gradient: const LinearGradient(
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+                colors: [
+                  Color(0xFFFF9BCB),
+                  Color(0xFFFF67AD),
+                  Color(0xFFE94F98),
+                ],
+              ),
+              border: Border.all(color: Colors.white, width: 2.5),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFFFF67AD).withValues(alpha: 0.45),
+                  blurRadius: 18,
+                  offset: const Offset(0, 7),
+                ),
+              ],
+            ),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: widget.onPressed,
+                borderRadius: BorderRadius.circular(28),
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          'NEXT LEVEL',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 17,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 1.3,
+                          ),
+                        ),
+                        SizedBox(width: 9),
+                        Icon(
+                          Icons.arrow_forward_rounded,
+                          color: Colors.white,
+                          size: 22,
+                        ),
+                      ],
+                    ),
+
+                    // Moving shine
+                    Positioned.fill(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(28),
+                        child: Align(
+                          alignment: Alignment(
+                            -1.5 + (_controller.value * 3.0),
+                            0,
+                          ),
+                          child: Container(
+                            width: 42,
+                            height: 80,
+                            transform: Matrix4.rotationZ(0.25),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.18),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ================================================================
 // ANIMATED SHOOTER BUBBLE
 // ================================================================
 
@@ -3424,907 +4191,6 @@ class _GameOverOverlay extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-// ================================================================
-// LEVEL COMPLETE OVERLAY
-// ================================================================
-
-class _LevelCompleteOverlay extends StatefulWidget {
-  final ConfettiController confettiController;
-  final int score;
-  final int stars;
-  final List<String> completedWords;
-  final Map<String, Color> letterColors;
-  final VoidCallback onPressed;
-
-  const _LevelCompleteOverlay({
-    required this.confettiController,
-    required this.score,
-    required this.stars,
-    required this.completedWords,
-    required this.letterColors,
-    required this.onPressed,
-  });
-
-  @override
-  State<_LevelCompleteOverlay> createState() => _LevelCompleteOverlayState();
-}
-
-class _LevelCompleteOverlayState extends State<_LevelCompleteOverlay>
-    with TickerProviderStateMixin {
-  late final AnimationController _cardController;
-  late final AnimationController _floatController;
-  late final AnimationController _buttonController;
-
-  @override
-  void initState() {
-    super.initState();
-
-    _cardController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 650),
-    )..forward();
-
-    _floatController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 2200),
-    )..repeat(reverse: true);
-
-    _buttonController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1700),
-    )..repeat(reverse: true);
-  }
-
-  @override
-  void dispose() {
-    _cardController.dispose();
-    _floatController.dispose();
-    _buttonController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      color: Colors.black.withValues(alpha: 0.48),
-      child: Stack(
-        children: [
-          // ==========================================================
-          // CONFETTI
-          // ==========================================================
-
-          Positioned.fill(
-            child: IgnorePointer(
-              child: ConfettiWidget(
-                confettiController: widget.confettiController,
-                blastDirectionality: BlastDirectionality.explosive,
-                shouldLoop: false,
-                numberOfParticles: 34,
-                gravity: 0.22,
-                emissionFrequency: 0.04,
-                colors: const [
-                  Color(0xFFFF6FAE),
-                  Color(0xFFFFC857),
-                  Color(0xFF63D6B0),
-                  Color(0xFF5DABFF),
-                  Color(0xFFC08BFF),
-                ],
-              ),
-            ),
-          ),
-
-          // ==========================================================
-          // MAIN CARD
-          // ==========================================================
-          Center(
-            child: AnimatedBuilder(
-              animation: _cardController,
-              builder: (context, child) {
-                final double t = Curves.easeOutBack.transform(
-                  _cardController.value,
-                );
-
-                return Opacity(
-                  opacity: _cardController.value.clamp(0.0, 1.0),
-                  child: Transform.scale(
-                    scale: 0.88 + (0.12 * t),
-                    child: child,
-                  ),
-                );
-              },
-              child: Container(
-                constraints: const BoxConstraints(maxWidth: 430),
-
-                margin: const EdgeInsets.symmetric(horizontal: 20),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFFF8FC),
-                  borderRadius: BorderRadius.circular(28),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.9),
-                    width: 1.5,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFF5D3B4A).withValues(alpha: 0.20),
-                      blurRadius: 42,
-                      spreadRadius: 2,
-                      offset: const Offset(0, 18),
-                    ),
-                  ],
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(28),
-                  child: Stack(
-                    children: [
-                      // ==================================================
-                      // SOFT BACKGROUND GLOW
-                      // ==================================================
-
-                      Positioned(
-                        top: -70,
-                        right: -55,
-                        child: Container(
-                          width: 180,
-                          height: 180,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: const Color(
-                              0xFFFFA9CD,
-                            ).withValues(alpha: 0.16),
-                          ),
-                        ),
-                      ),
-
-                      Positioned(
-                        bottom: -70,
-                        left: -60,
-                        child: Container(
-                          width: 190,
-                          height: 190,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: const Color(
-                              0xFFFFD76A,
-                            ).withValues(alpha: 0.10),
-                          ),
-                        ),
-                      ),
-
-                      // ==================================================
-                      // DECORATIVE PETALS
-                      // ==================================================
-                      AnimatedBuilder(
-                        animation: _floatController,
-                        builder: (context, child) {
-                          final double t = Curves.easeInOut.transform(
-                            _floatController.value,
-                          );
-
-                          return Stack(
-                            children: [
-                              Positioned(
-                                top: 24 + (t * 7),
-                                left: 25,
-                                child: Transform.rotate(
-                                  angle: -0.25 + (t * 0.15),
-                                  child: const _FloatingPetal(
-                                    size: 13,
-                                    color: Color(0xFFFFB4D1),
-                                  ),
-                                ),
-                              ),
-                              Positioned(
-                                top: 75 - (t * 8),
-                                right: 25,
-                                child: Transform.rotate(
-                                  angle: 0.35 - (t * 0.18),
-                                  child: const _FloatingPetal(
-                                    size: 10,
-                                    color: Color(0xFFFFD36A),
-                                  ),
-                                ),
-                              ),
-                              Positioned(
-                                top: 135 + (t * 6),
-                                left: 17,
-                                child: Transform.rotate(
-                                  angle: 0.45,
-                                  child: const _FloatingPetal(
-                                    size: 8,
-                                    color: Color(0xFFFFC4DC),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          );
-                        },
-                      ),
-
-                      // ==================================================
-                      // CONTENT
-                      // ==================================================
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(18, 14, 18, 12),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            // ============================================
-                            // BLOOM DECORATION
-                            // ============================================
-
-                            const _CompletionBloom(),
-
-                            const SizedBox(height: 8),
-
-                            // ============================================
-                            // TITLE
-                            // ============================================
-                            const Text(
-                              'LEVEL COMPLETE',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontSize: 25,
-                                fontWeight: FontWeight.w900,
-                                color: Color(0xFF3B2932),
-                                letterSpacing: 0.7,
-                                height: 1.0,
-                              ),
-                            ),
-
-                            const SizedBox(height: 10),
-
-                            // ============================================
-                            // STARS
-                            // ============================================
-                            _StarRow(stars: widget.stars),
-
-                            const SizedBox(height: 10),
-
-                            // ============================================
-                            // WORDS
-                            // ============================================
-                            _WordsFoundCard(
-                              words: widget.completedWords,
-                              letterColors: widget.letterColors,
-                            ),
-
-                            const SizedBox(height: 9),
-
-                            // ============================================
-                            // SCORE
-                            // ============================================
-                            _ScoreReward(score: widget.score),
-
-                            const SizedBox(height: 10),
-
-                            // ============================================
-                            // NEXT LEVEL
-                            // ============================================
-                            SizedBox(
-                              width: double.infinity,
-                              height: 54,
-                              child: _NextLevelButton(
-                                onPressed: widget.onPressed,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ================================================================
-// FLOATING PETAL
-// ================================================================
-
-class _FloatingPetal extends StatelessWidget {
-  final double size;
-  final Color color;
-
-  const _FloatingPetal({required this.size, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size * 0.65,
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.75),
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(size),
-          topRight: Radius.circular(size),
-          bottomLeft: Radius.circular(size * 0.2),
-          bottomRight: Radius.circular(size),
-        ),
-      ),
-    );
-  }
-}
-
-// ================================================================
-// COMPLETION BLOOM
-// ================================================================
-
-class _CompletionBloom extends StatefulWidget {
-  const _CompletionBloom();
-
-  @override
-  State<_CompletionBloom> createState() => _CompletionBloomState();
-}
-
-class _CompletionBloomState extends State<_CompletionBloom>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1800),
-    )..repeat(reverse: true);
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, child) {
-        final double t = Curves.easeInOut.transform(_controller.value);
-
-        return Transform.translate(
-          offset: Offset(0, -2 * t),
-          child: Transform.scale(
-            scale: 0.96 + (t * 0.04),
-            child: SizedBox(
-              width: 92,
-              height: 70,
-              child: CustomPaint(painter: _BloomPainter(glow: t)),
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-// ================================================================
-// BLOOM PAINTER
-// ================================================================
-
-class _BloomPainter extends CustomPainter {
-  final double glow;
-
-  const _BloomPainter({required this.glow});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final Offset center = Offset(size.width / 2, size.height / 2 + 5);
-
-    final Paint glowPaint = Paint()
-      ..color = const Color(0xFFFF6FAE).withValues(alpha: 0.10 + glow * 0.08)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12);
-
-    canvas.drawCircle(center, 27, glowPaint);
-
-    final Paint petalPaint = Paint()..color = const Color(0xFFFFA9C9);
-
-    final Paint petalLightPaint = Paint()..color = const Color(0xFFFFC4DB);
-
-    final Paint centerPaint = Paint()..color = const Color(0xFFFFC857);
-
-    for (int i = 0; i < 8; i++) {
-      final double angle = (i * pi / 4) - (pi / 2);
-
-      final double x = center.dx + cos(angle) * 23;
-
-      final double y = center.dy + sin(angle) * 23;
-
-      final Paint paint = i.isEven ? petalPaint : petalLightPaint;
-
-      canvas.save();
-      canvas.translate(x, y);
-      canvas.rotate(angle);
-
-      final Path petal = Path()
-        ..moveTo(0, 0)
-        ..quadraticBezierTo(11, -7, 14, 0)
-        ..quadraticBezierTo(11, 8, 0, 0);
-
-      canvas.drawPath(petal, paint);
-      canvas.restore();
-    }
-
-    canvas.drawCircle(center, 11, centerPaint);
-
-    final Paint dotPaint = Paint()..color = const Color(0xFFFFF4CC);
-
-    for (int i = 0; i < 6; i++) {
-      final double angle = i * pi / 3;
-
-      canvas.drawCircle(
-        Offset(center.dx + cos(angle) * 6, center.dy + sin(angle) * 6),
-        1.7,
-        dotPaint,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _BloomPainter oldDelegate) {
-    return oldDelegate.glow != glow;
-  }
-}
-
-// ================================================================
-// WORDS FOUND
-// ================================================================
-
-class _WordsFoundCard extends StatelessWidget {
-  final List<String> words;
-  final Map<String, Color> letterColors;
-
-  const _WordsFoundCard({required this.words, required this.letterColors});
-
-  @override
-  Widget build(BuildContext context) {
-    if (words.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(13, 11, 13, 12),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.72),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFFFFD5E6), width: 1),
-      ),
-      child: Column(
-        children: [
-          // --------------------------------------------------------
-          // HEADER
-          // --------------------------------------------------------
-
-          Row(
-            children: [
-              const Icon(
-                Icons.auto_awesome_rounded,
-                size: 18,
-                color: Color(0xFFFF4D96),
-              ),
-
-              const SizedBox(width: 7),
-
-              const Text(
-                'WORDS FOUND',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w900,
-                  color: Color(0xFF6E4C5B),
-                  letterSpacing: 1.35,
-                ),
-              ),
-
-              const Spacer(),
-
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFFEEF5),
-                  borderRadius: BorderRadius.circular(9),
-                ),
-                child: Text(
-                  '${words.length}',
-                  style: const TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w900,
-                    color: Color(0xFFFF4D96),
-                  ),
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 9),
-
-          // --------------------------------------------------------
-          // WORD CHIPS
-          // --------------------------------------------------------
-          Wrap(
-            alignment: WrapAlignment.center,
-            spacing: 6,
-            runSpacing: 6,
-            children: List.generate(words.length, (index) {
-              final String word = words[index].toUpperCase();
-
-              return _AnimatedWordChip(
-                word: word,
-                index: index,
-                color: _wordColor(word),
-              );
-            }),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Color _wordColor(String word) {
-    if (word.isEmpty) {
-      return const Color(0xFFFF6FAE);
-    }
-
-    return letterColors[word[0].toUpperCase()] ?? const Color(0xFFFF6FAE);
-  }
-}
-
-// ================================================================
-// ANIMATED WORD CHIP
-// ================================================================
-
-class _AnimatedWordChip extends StatefulWidget {
-  final String word;
-  final int index;
-  final Color color;
-
-  const _AnimatedWordChip({
-    required this.word,
-    required this.index,
-    required this.color,
-  });
-
-  @override
-  State<_AnimatedWordChip> createState() => _AnimatedWordChipState();
-}
-
-class _AnimatedWordChipState extends State<_AnimatedWordChip>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 420),
-    );
-
-    Future.delayed(Duration(milliseconds: 100 + widget.index * 70), () {
-      if (mounted) {
-        _controller.forward();
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, child) {
-        final double t = Curves.easeOutBack.transform(_controller.value);
-
-        return Opacity(
-          opacity: _controller.value.clamp(0.0, 1.0),
-          child: Transform.scale(scale: 0.82 + (0.18 * t), child: child),
-        );
-      },
-      child: Container(
-        constraints: const BoxConstraints(minWidth: 72),
-        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: widget.color.withValues(alpha: 0.18)),
-          boxShadow: [
-            BoxShadow(
-              color: widget.color.withValues(alpha: 0.08),
-              blurRadius: 6,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 18,
-              height: 18,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: widget.color.withValues(alpha: 0.13),
-              ),
-              child: Icon(Icons.check_rounded, size: 11, color: widget.color),
-            ),
-
-            const SizedBox(width: 5),
-
-            Text(
-              widget.word,
-              style: const TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w900,
-                color: Color(0xFF45333B),
-                letterSpacing: 0.6,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ================================================================
-// SCORE REWARD
-// ================================================================
-
-class _ScoreReward extends StatelessWidget {
-  final int score;
-
-  const _ScoreReward({required this.score});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        const Icon(Icons.stars_rounded, size: 22, color: Color(0xFFFFB92E)),
-
-        const SizedBox(width: 7),
-
-        const Text(
-          'SCORE',
-          style: TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w900,
-            color: Color(0xFF947481),
-            letterSpacing: 1.4,
-          ),
-        ),
-
-        const SizedBox(width: 9),
-
-        TweenAnimationBuilder<int>(
-          tween: IntTween(begin: 0, end: score),
-          duration: const Duration(milliseconds: 850),
-          curve: Curves.easeOutCubic,
-          builder: (context, value, child) {
-            return Text(
-              '+$value',
-              style: const TextStyle(
-                fontSize: 21,
-                fontWeight: FontWeight.w900,
-                color: Color(0xFFFF4D96),
-              ),
-            );
-          },
-        ),
-      ],
-    );
-  }
-}
-
-// ================================================================
-// NEXT LEVEL BUTTON
-// ================================================================
-
-class _NextLevelButton extends StatefulWidget {
-  final VoidCallback onPressed;
-
-  const _NextLevelButton({required this.onPressed});
-
-  @override
-  State<_NextLevelButton> createState() => _NextLevelButtonState();
-}
-
-class _NextLevelButtonState extends State<_NextLevelButton>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1500),
-    )..repeat();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, child) {
-        final double t = Curves.easeInOut.transform(_controller.value);
-
-        return GestureDetector(
-          onTap: widget.onPressed,
-          child: Container(
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [Color(0xFFFF8FBE), Color(0xFFFF4D96)],
-              ),
-              borderRadius: BorderRadius.circular(18),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFFFF4D96).withValues(alpha: 0.25),
-                  blurRadius: 15 + (t * 5),
-                  spreadRadius: 1,
-                  offset: const Offset(0, 5),
-                ),
-              ],
-            ),
-            child: Stack(
-              children: [
-                // ==============================================
-                // SHINE
-                // ==============================================
-
-                Positioned.fill(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(18),
-                    child: FractionallySizedBox(
-                      widthFactor: 0.30,
-                      alignment: Alignment(-1.8 + (t * 5.6), 0),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [
-                              Colors.white.withValues(alpha: 0.0),
-                              Colors.white.withValues(alpha: 0.20),
-                              Colors.white.withValues(alpha: 0.0),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-
-                // ==============================================
-                // CONTENT
-                // ==============================================
-                Center(
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Text(
-                        'NEXT LEVEL',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 1.15,
-                        ),
-                      ),
-
-                      const SizedBox(width: 10),
-
-                      Container(
-                        width: 30,
-                        height: 30,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.18),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          Icons.arrow_forward_rounded,
-                          color: Colors.white,
-                          size: 19,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-// ================================================================
-// STARS
-// ================================================================
-
-class _StarRow extends StatelessWidget {
-  final int stars;
-
-  const _StarRow({required this.stars});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: List.generate(3, (i) {
-        final bool filled = i < stars;
-
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 5),
-          child: TweenAnimationBuilder<double>(
-            tween: Tween(begin: 0.0, end: filled ? 1.0 : 0.78),
-            duration: Duration(milliseconds: 500 + i * 180),
-            curve: Curves.elasticOut,
-            builder: (context, scale, child) {
-              return Transform.scale(
-                scale: scale,
-                child: Container(
-                  width: 52,
-                  height: 52,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: filled
-                        ? const LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [Color(0xFFFFF7DF), Color(0xFFFFE7A5)],
-                          )
-                        : null,
-                    color: filled ? null : const Color(0xFFF3F0ED),
-                    boxShadow: filled
-                        ? [
-                            BoxShadow(
-                              color: const Color(
-                                0xFFFFC857,
-                              ).withValues(alpha: 0.22),
-                              blurRadius: 12,
-                              spreadRadius: 1,
-                            ),
-                          ]
-                        : null,
-                  ),
-                  child: Icon(
-                    filled ? Icons.star_rounded : Icons.star_border_rounded,
-                    size: 35,
-                    color: filled
-                        ? const Color(0xFFFFB92E)
-                        : const Color(0xFFC9C1BC),
-                  ),
-                ),
-              );
-            },
-          ),
-        );
-      }),
     );
   }
 }
