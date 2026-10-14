@@ -80,10 +80,26 @@ class GameEngine {
 
   void setDictionary(Set<String> words) {
     _dictionary = words;
-    _prefixes = {};
-    for (final String w in words) {
+    final Set<String> prefixes = {};
+    _prefixes = prefixes;
+    _buildPrefixes(words.iterator, prefixes);
+  }
+
+  /// Builds the prefix table in small slices so the game never freezes
+  /// while the (big) dictionary is being indexed.
+  Future<void> _buildPrefixes(
+    Iterator<String> it,
+    Set<String> target,
+  ) async {
+    int n = 0;
+    while (it.moveNext()) {
+      final String w = it.current;
       for (int i = 1; i <= w.length; i++) {
-        _prefixes.add(w.substring(0, i));
+        target.add(w.substring(0, i));
+      }
+      if (++n % 1500 == 0) {
+        await Future<void>.delayed(Duration.zero);
+        if (!identical(_prefixes, target)) return; // a newer dictionary won
       }
     }
   }
@@ -148,7 +164,7 @@ class GameEngine {
   /// How many rows are visible on screen at once. Taller patterns
   /// start partly above the screen and slide down as the bottom
   /// of the board gets cleared.
-  static const int visibleRows = 6;
+  static const int visibleRows = 5;
 
   /// Total vertical shift applied to the board (<= 0 while rows are
   /// still hidden above the screen).
@@ -278,14 +294,14 @@ class GameEngine {
   double horizontalSpacing = 0.104;
 
   /// Used by the UI aim clamp and as the reference for the first row.
-  final double boardTopY = 0.16;
+  final double boardTopY = 0.115; // top row hangs right under the top bar
 
   /// Center y of the first row (must match _addRow).
   double get _topRowY => boardTopY + 0.03;
 
   /// Highest y where a shot bubble's center can go (aim line and
   /// bubble both stop here). Raise this number if it hits the top bar.
-  double get _ceilingY => headerY + bubbleRadius * _aspect;
+  double get _ceilingY => _topRowY - 0.002;
 
   final double dangerLineY = 0.86;
 
@@ -527,6 +543,37 @@ class GameEngine {
       '...#..',
       '..#...',
       '..#...',
+    ],
+    // Twin towers (two separate clusters, open lane in the middle)
+    [
+      '##..##',
+      '##..##',
+      '##..##',
+      '##..##',
+      '##..##',
+      '##..##',
+      '##..##',
+      '##..##',
+    ],
+    // Twin diamonds
+    [
+      '.#..#.',
+      '##..##',
+      '##..##',
+      '##..##',
+      '##..##',
+      '##..##',
+      '##..##',
+      '##..##',
+      '.#..#.',
+    ],
+    // Wings
+    [
+      '#....#',
+      '##..##',
+      '##..##',
+      '##..##',
+      '.#..#.',
     ],
     // Chevron
     [

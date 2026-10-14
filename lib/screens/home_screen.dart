@@ -2,10 +2,24 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../sound_service.dart';
 import 'level_select_screen.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Start the sound system + calm menu music on the very first page.
+    SoundService.instance.ensureStarted();
+    SoundService.instance.playMenuMusic();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -47,6 +61,7 @@ class HomeScreen extends StatelessWidget {
             alignment: const Alignment(0, 0.40),
             child: _StartButton(
               onTap: () {
+                SoundService.instance.click();
                 Navigator.of(context).push(
                   MaterialPageRoute(
                     builder: (context) => const LevelSelectScreen(),

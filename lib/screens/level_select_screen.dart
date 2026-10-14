@@ -6,6 +6,9 @@ import 'package:flutter/material.dart';
 import '../levels.dart';
 import '../word_bloom.dart';
 import '../progress_service.dart';
+import '../gift_service.dart';
+import '../gift_box.dart';
+import '../sound_service.dart';
 
 // ─────────────────────────────────────────────────────────────
 // Shared pink palette for popups
@@ -65,9 +68,13 @@ class _LevelSelectScreenState extends State<LevelSelectScreen>
   Map<int, int> _levelStars = {};
   bool _progressLoaded = false;
 
-  // TODO: connect to your real coins source, e.g.
-  // _coins = await ProgressService.getCoins();  (inside _loadProgress)
+  // Coins are now loaded from GiftService (see _loadProgress).
+  // If you already have your own coins source, change
+  // GiftService.getCoins() / addCoins() inside gift_service.dart.
   int _coins = 0;
+
+  // Gift boxes that the player has already opened.
+  Set<int> _openedGifts = {};
 
   int get _totalStars => _levelStars.values.fold(0, (a, b) => a + b);
 
@@ -96,18 +103,24 @@ class _LevelSelectScreenState extends State<LevelSelectScreen>
   @override
   void initState() {
     super.initState();
+    SoundService.instance.playMenuMusic();
+    SoundService.instance.ensureStarted(); // background nature music
     _loadProgress(jumpToLevel: true);
   }
 
   Future<void> _loadProgress({bool jumpToLevel = false}) async {
     final unlocked = await ProgressService.getUnlockedLevel();
     final stars = await ProgressService.getLevelStars();
+    final coins = await GiftService.getCoins();
+    final openedGifts = await GiftService.getOpenedGifts();
 
     if (!mounted) return;
 
     setState(() {
       _unlockedLevel = unlocked.clamp(1, _totalLevels);
       _levelStars = stars;
+      _coins = coins;
+      _openedGifts = openedGifts;
       _progressLoaded = true;
     });
 
@@ -139,8 +152,59 @@ class _LevelSelectScreenState extends State<LevelSelectScreen>
     super.dispose();
   }
 
+  // ── Gift boxes ──────────────────────────────────────────────
+
+  void _showGiftHint(String text) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            text,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontWeight: FontWeight.w800,
+              color: Colors.white,
+            ),
+          ),
+          backgroundColor: _kPink,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(milliseconds: 1600),
+          shape: const StadiumBorder(),
+          margin: const EdgeInsets.fromLTRB(40, 0, 40, 90),
+        ),
+      );
+  }
+
+  Future<void> _onGiftTap(int giftLevel, GiftState state) async {
+    SoundService.instance.click();
+    if (state == GiftState.locked) {
+      _showGiftHint('Complete level $giftLevel to unlock this gift');
+      return;
+    }
+    if (state == GiftState.opened) {
+      _showGiftHint('You already opened this gift');
+      return;
+    }
+
+    // Random rewards are picked and saved right here.
+    final List<GiftReward> rewards = await GiftService.open(giftLevel);
+    if (!mounted || rewards.isEmpty) return;
+
+    await showGiftOpenDialog(context, rewards);
+    if (!mounted) return;
+
+    final int coins = await GiftService.getCoins();
+    if (!mounted) return;
+    setState(() {
+      _coins = coins;
+      _openedGifts = {..._openedGifts, giftLevel};
+    });
+  }
+
   void _showLevelPreview(int levelNumber) {
     if (levelNumber > _unlockedLevel) return;
+    SoundService.instance.click();
 
     final GameLevel lv = getLevel(levelNumber);
 
@@ -173,7 +237,11 @@ class _LevelSelectScreenState extends State<LevelSelectScreen>
           },
         ),
       ),
-    );
+    ).then((_) {
+      // Coins are saved while playing, so refresh them when coming back
+      // (also when the player leaves without finishing the level).
+      if (mounted) _loadProgress();
+    });
   }
 
   @override
@@ -189,24 +257,30 @@ class _LevelSelectScreenState extends State<LevelSelectScreen>
 
     return Scaffold(
       backgroundColor: const Color(0xFFFFEDF4),
-      body: SafeArea(
-        child: Stack(
-          children: [
-            const Positioned.fill(
-              child: DecoratedBox(
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          // Full-screen background picture (also behind status bar / bottom)
+          Positioned.fill(
+            child: Image.asset(
+              'assets/images/bg_level_select.png',
+              fit: BoxFit.cover,
+              alignment: Alignment.center,
+              gaplessPlayback: true,
+              errorBuilder: (context, error, stack) => const DecoratedBox(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
-                    colors: [
-                      Color(0xFFFFF4F8),
-                      Color(0xFFF9DFEA),
-                      Color(0xFFFFEDF4),
-                    ],
+                    colors: [Color(0xFFFFF4F8), Color(0xFFF9DFEA), Color(0xFFFFEDF4)],
                   ),
                 ),
               ),
             ),
+          ),
+          SafeArea(
+        child: Stack(
+          children: [
             Positioned.fill(
               child: CustomPaint(painter: _RoadPainter(_scrollController)),
             ),
@@ -229,6 +303,21 @@ class _LevelSelectScreenState extends State<LevelSelectScreen>
               },
             ),
 
+            // GIFT BOXES on the road (after every 11 levels + a few extra)
+            Positioned.fill(
+              child: GiftPathLayer(
+                controller: _scrollController,
+                unlockedLevel: _unlockedLevel,
+                openedGifts: _openedGifts,
+                totalLevels: _totalLevels,
+                nodeSpacing: _nodeSpacing,
+                topPad: 105,
+                nodeCenterY: _nodeCenterY,
+                xPattern: _xPattern,
+                onGiftTap: _onGiftTap,
+              ),
+            ),
+
             // Top bar: coins + stars + settings
             Positioned(
               top: 0,
@@ -236,16 +325,8 @@ class _LevelSelectScreenState extends State<LevelSelectScreen>
               right: 0,
               child: Container(
                 padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFFF7FA).withValues(alpha: 0.96),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.05),
-                      blurRadius: 12,
-                      offset: const Offset(0, 5),
-                    ),
-                  ],
-                ),
+                // transparent: the background picture shows through
+                // (only the pills / buttons themselves stay visible)
                 child: Row(
                   children: [
                     _RoundIconButton(
@@ -259,6 +340,7 @@ class _LevelSelectScreenState extends State<LevelSelectScreen>
                       child: _StatPill(
                         icon: Icons.monetization_on_rounded,
                         iconColor: const Color(0xFFFFB52E),
+                        leading: const CoinIcon(size: 30),
                         value: '$_coins',
                         showPlus: true,
                         onPlusTap: () {
@@ -305,6 +387,8 @@ class _LevelSelectScreenState extends State<LevelSelectScreen>
             ),
           ],
         ),
+      ),
+        ],
       ),
     );
   }
@@ -433,25 +517,25 @@ class _RoadPainter extends CustomPainter {
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10),
     );
 
-    // Pale outer rim
-    canvas.drawPath(path, stroke(58)..color = const Color(0xFFFFF8FB));
+    // Soft pink outer rim (no white)
+    canvas.drawPath(path, stroke(58)..color = const Color(0xAAF58BBE));
 
-    // Main ribbon (pink -> lavender glass feel)
+    // Main ribbon (deeper pink -> lilac, matches background)
     canvas.drawPath(
       path,
       stroke(48)
         ..shader = const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFFF2C3E3), Color(0xFFE3C6F2), Color(0xFFF2C3E3)],
+          colors: [Color(0xEEF7A3CB), Color(0xEEC9A4EC), Color(0xEEF7A3CB)],
         ).createShader(Offset.zero & size),
     );
 
-    // Lighter inner lane
-    canvas.drawPath(path, stroke(28)..color = const Color(0x55FFFFFF));
+    // Slightly lighter inner lane (pink tint, not white)
+    canvas.drawPath(path, stroke(28)..color = const Color(0x44FFC2DE));
 
-    // Thin glossy highlight
-    canvas.drawPath(path, stroke(3)..color = const Color(0xAAFFFFFF));
+    // Thin soft highlight
+    canvas.drawPath(path, stroke(3)..color = const Color(0x66FFE0EE));
   }
 
   @override
@@ -477,9 +561,9 @@ class _LevelNode extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final List<Color> sphereColors = current
-        ? const [Color(0xFFFFB3D1), Color(0xFFE0388C)]
+        ? const [Color(0xFFC9A8F5), Color(0xFF7E4FCF)]
         : unlocked
-        ? const [Color(0xFFD9C2F5), Color(0xFF9272CC)]
+        ? const [Color(0xFFFFB3D1), Color(0xFFE0388C)]
         : const [Color(0xFFDDD0EA), Color(0xFFB2A2C6)];
 
     return SizedBox(
@@ -520,9 +604,9 @@ class _LevelNode extends StatelessWidget {
                     BoxShadow(
                       color:
                           (current
-                                  ? const Color(0xFFFF6FAE)
-                                  : const Color(0xFF7B5BB5))
-                              .withValues(alpha: current ? 0.45 : 0.28),
+                                  ? const Color(0xFF8E5CE0)
+                                  : const Color(0xFFE0388C))
+                              .withValues(alpha: current ? 0.5 : 0.28),
                       blurRadius: current ? 20 : 12,
                       offset: const Offset(0, 6),
                     ),
@@ -614,7 +698,7 @@ class _Pedestal extends StatelessWidget {
         gradient: const LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [Colors.white, Color(0xFFEBDDF0)],
+          colors: [Color(0xFFFFE3F0), Color(0xFFF3C4E0)],
         ),
         border: Border.all(color: Colors.white, width: 2),
         boxShadow: [
@@ -694,7 +778,7 @@ class _ArrowPainter extends CustomPainter {
     canvas.drawPath(
       arrow,
       Paint()
-        ..color = const Color(0x88FF6FAE)
+        ..color = const Color(0x888E5CE0)
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8),
     );
 
@@ -705,7 +789,7 @@ class _ArrowPainter extends CustomPainter {
         ..shader = const LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [Color(0xFFFFB3D1), Color(0xFFE0388C)],
+          colors: [Color(0xFFC9A8F5), Color(0xFF7E4FCF)],
         ).createShader(const Rect.fromLTWH(0, 0, 44, 52)),
     );
 
@@ -716,7 +800,7 @@ class _ArrowPainter extends CustomPainter {
         ..style = PaintingStyle.stroke
         ..strokeWidth = 3
         ..strokeJoin = StrokeJoin.round
-        ..color = const Color(0xFFB0206B),
+        ..color = const Color(0xFF5B34A8),
     );
 
     // glossy highlight on the shaft
@@ -776,8 +860,8 @@ class _PedestalGlowState extends State<_PedestalGlow>
               borderRadius: const BorderRadius.all(Radius.elliptical(56, 26)),
               gradient: RadialGradient(
                 colors: [
-                  const Color(0xFFFF6FAE).withValues(alpha: 0.35 + 0.35 * t),
-                  const Color(0xFFFF6FAE).withValues(alpha: 0.12 + 0.1 * t),
+                  const Color(0xFF8E5CE0).withValues(alpha: 0.35 + 0.35 * t),
+                  const Color(0xFF8E5CE0).withValues(alpha: 0.12 + 0.1 * t),
                 ],
               ),
               boxShadow: [
@@ -805,9 +889,13 @@ class _StatPill extends StatelessWidget {
   final bool showPlus;
   final VoidCallback? onPlusTap;
 
+  /// Optional custom icon widget (used for the coin) instead of [icon].
+  final Widget? leading;
+
   const _StatPill({
     required this.icon,
     required this.iconColor,
+    this.leading,
     required this.value,
     this.showPlus = false,
     this.onPlusTap,
@@ -835,18 +923,19 @@ class _StatPill extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(
-            icon,
-            size: 30,
-            color: iconColor,
-            shadows: const [
-              Shadow(
-                color: Color(0x55B56B00),
-                blurRadius: 4,
-                offset: Offset(0, 2),
+          leading ??
+              Icon(
+                icon,
+                size: 30,
+                color: iconColor,
+                shadows: const [
+                  Shadow(
+                    color: Color(0x55B56B00),
+                    blurRadius: 4,
+                    offset: Offset(0, 2),
+                  ),
+                ],
               ),
-            ],
-          ),
           Expanded(
             child: FittedBox(
               fit: BoxFit.scaleDown,
@@ -862,7 +951,10 @@ class _StatPill extends StatelessWidget {
           ),
           if (showPlus)
             GestureDetector(
-              onTap: onPlusTap,
+              onTap: () {
+                SoundService.instance.click();
+                onPlusTap?.call();
+              },
               child: Container(
                 width: 28,
                 height: 28,
@@ -930,6 +1022,7 @@ class _AnimatedSettingsButtonState extends State<_AnimatedSettingsButton>
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: () {
+        SoundService.instance.click();
         _tap.forward(from: 0);
         widget.onTap();
       },
@@ -1164,7 +1257,10 @@ class _DialogShell extends StatelessWidget {
               top: 58,
               right: 14,
               child: GestureDetector(
-                onTap: onClose,
+                onTap: () {
+                  SoundService.instance.click();
+                  onClose();
+                },
                 child: Container(
                   width: 36,
                   height: 36,
@@ -1466,9 +1562,26 @@ class _SettingsRowState extends State<_SettingsRow> {
   bool enabled = true;
 
   @override
+  void initState() {
+    super.initState();
+    // Music / Sound switches are real now (saved on the phone).
+    if (widget.label == 'Music') enabled = SoundService.instance.musicOn;
+    if (widget.label == 'Sound') enabled = SoundService.instance.soundOn;
+  }
+
+  @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => setState(() => enabled = !enabled),
+      onTap: () {
+        setState(() => enabled = !enabled);
+        if (widget.label == 'Music') {
+          SoundService.instance.setMusicOn(enabled);
+        } else if (widget.label == 'Sound') {
+          SoundService.instance.setSoundOn(enabled);
+        } else {
+          SoundService.instance.click();
+        }
+      },
       child: Container(
         padding: const EdgeInsets.fromLTRB(10, 10, 14, 10),
         decoration: BoxDecoration(
@@ -1633,6 +1746,7 @@ class _PillButtonState extends State<_PillButton>
       },
       onTapUp: (_) {
         _pressController.forward();
+        SoundService.instance.click();
         widget.onTap();
       },
       onTapCancel: () {
@@ -1717,7 +1831,10 @@ class _RoundIconButton extends StatelessWidget {
       color: Colors.transparent,
       shape: const CircleBorder(),
       child: InkWell(
-        onTap: onTap,
+        onTap: () {
+          SoundService.instance.click();
+          onTap();
+        },
         customBorder: const CircleBorder(),
         child: Container(
           width: 44,
@@ -1738,7 +1855,7 @@ class _RoundIconButton extends StatelessWidget {
               ),
             ],
           ),
-          child: Icon(icon, size: 20, color: const Color(0xFF70465A)),
+          child: Icon(icon, size: 22, color: const Color(0xFFE0287F)),
         ),
       ),
     );

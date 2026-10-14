@@ -38,22 +38,22 @@ class BoosterBar extends StatelessWidget {
           return Container(
             padding: const EdgeInsets.fromLTRB(4, 13, 4, 8),
             decoration: BoxDecoration(
-              // Deeper pink -> purple so the bar stands out from the screen.
-              gradient: const LinearGradient(
+              // See-through glass bar: the background (flowers) shows through.
+              gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
-                  Color(0xFFFFB3D6),
-                  Color(0xFFFF8FC2),
-                  Color(0xFFC49BF2),
+                  const Color(0xFFFFB3D6).withValues(alpha: 0.38),
+                  const Color(0xFFFF8FC2).withValues(alpha: 0.30),
+                  const Color(0xFFC49BF2).withValues(alpha: 0.38),
                 ],
               ),
               borderRadius: BorderRadius.circular(34),
               border: Border.all(color: Colors.white, width: 3),
               boxShadow: [
                 BoxShadow(
-                  color: _roseDeep.withValues(alpha: 0.38),
-                  blurRadius: 22,
+                  color: _roseDeep.withValues(alpha: 0.18),
+                  blurRadius: 18,
                   offset: const Offset(0, 8),
                 ),
               ],
@@ -654,29 +654,152 @@ class BoosterIconPainter extends CustomPainter {
   }
 
   void _bomb(Canvas canvas, Offset c, double r) {
+    // A proper round bomb: dark glossy body, metal cap, fuse and a spark.
+    final Offset bc = c + Offset(-r * 0.06, r * 0.14);
+    final double br = r * 0.66;
+    final Rect body = Rect.fromCircle(center: bc, radius: br);
+
+    // soft shadow
     canvas.drawCircle(
-      c,
-      r * 0.96,
+      bc.translate(0, br * 0.12),
+      br,
       Paint()
-        ..color = _rose.withValues(alpha: 0.30)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
+        ..color = Colors.black.withValues(alpha: 0.28)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5),
     );
-    _bubble(canvas, c, r * 0.88, const Color(0xFFFFC2DC), _rose);
-    _flower(
-      canvas,
-      c,
-      r * 0.80,
-      6,
-      const Color(0xFFFFF0F7),
-      const Color(0xFFFF8FBE),
-      petalW: 0.55,
-      petalH: 0.80,
-      dist: 0.42,
+
+    // dark body
+    canvas.drawCircle(
+      bc,
+      br,
+      Paint()
+        ..shader = const RadialGradient(
+          center: Alignment(-0.4, -0.5),
+          radius: 1.05,
+          colors: [Color(0xFF8B7A99), Color(0xFF3A2A47), Color(0xFF150C1B)],
+          stops: [0.0, 0.5, 1.0],
+        ).createShader(body),
     );
-    _gold(canvas, c, r * 0.19);
-    final Paint sparkle = Paint()..color = Colors.white.withValues(alpha: 0.9);
-    canvas.drawCircle(c.translate(r * 0.62, -r * 0.62), r * 0.07, sparkle);
-    canvas.drawCircle(c.translate(-r * 0.66, r * 0.50), r * 0.05, sparkle);
+
+    // pink rim light (matches the game's colours)
+    canvas.drawArc(
+      Rect.fromCircle(center: bc, radius: br * 0.92),
+      0.15,
+      1.6,
+      false,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = br * 0.08
+        ..strokeCap = StrokeCap.round
+        ..color = _rose.withValues(alpha: 0.80),
+    );
+
+    // gloss
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: bc.translate(-br * 0.38, -br * 0.42),
+        width: br * 0.56,
+        height: br * 0.30,
+      ),
+      Paint()..color = Colors.white.withValues(alpha: 0.60),
+    );
+    canvas.drawCircle(
+      bc.translate(-br * 0.06, -br * 0.70),
+      br * 0.06,
+      Paint()..color = Colors.white.withValues(alpha: 0.50),
+    );
+
+    // metal cap on the top-right of the body
+    const Offset dir = Offset(0.574, -0.819);
+    final Offset cc = bc + dir * (br * 0.96);
+    canvas.save();
+    canvas.translate(cc.dx, cc.dy);
+    canvas.rotate(atan2(dir.dy, dir.dx) + pi / 2);
+    final RRect cap = RRect.fromRectAndRadius(
+      Rect.fromCenter(
+        center: Offset.zero,
+        width: br * 0.62,
+        height: br * 0.34,
+      ),
+      Radius.circular(br * 0.08),
+    );
+    canvas.drawRRect(
+      cap,
+      Paint()
+        ..shader = const LinearGradient(
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+          colors: [Color(0xFFB9AAC6), Color(0xFF6E5C82), Color(0xFF45345A)],
+        ).createShader(cap.outerRect),
+    );
+    canvas.drawLine(
+      Offset(-br * 0.22, -br * 0.05),
+      Offset(br * 0.22, -br * 0.05),
+      Paint()
+        ..strokeWidth = br * 0.04
+        ..strokeCap = StrokeCap.round
+        ..color = Colors.white.withValues(alpha: 0.45),
+    );
+    canvas.restore();
+
+    // fuse
+    final Offset fs = cc + dir * (br * 0.14);
+    final Offset fe = c + Offset(r * 0.60, -r * 0.74);
+    final Path fuse = Path()
+      ..moveTo(fs.dx, fs.dy)
+      ..cubicTo(
+        fs.dx + r * 0.02,
+        fs.dy - r * 0.22,
+        fe.dx - r * 0.22,
+        fe.dy + r * 0.10,
+        fe.dx,
+        fe.dy,
+      );
+    canvas.drawPath(
+      fuse,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = r * 0.10
+        ..strokeCap = StrokeCap.round
+        ..color = const Color(0xFF7A5A3A),
+    );
+    canvas.drawPath(
+      fuse,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = r * 0.055
+        ..strokeCap = StrokeCap.round
+        ..color = const Color(0xFFFFE9B8),
+    );
+
+    // spark at the end of the fuse
+    canvas.drawCircle(
+      fe,
+      r * 0.26,
+      Paint()
+        ..color = const Color(0xFFFFC857).withValues(alpha: 0.60)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5),
+    );
+    final Path star = Path();
+    for (int i = 0; i < 16; i++) {
+      final double a = -pi / 2 + i * pi / 8;
+      final double rad = (i.isEven ? r * 0.18 : r * 0.07);
+      final Offset p = fe + Offset(cos(a), sin(a)) * rad;
+      if (i == 0) {
+        star.moveTo(p.dx, p.dy);
+      } else {
+        star.lineTo(p.dx, p.dy);
+      }
+    }
+    star.close();
+    canvas.drawPath(
+      star,
+      Paint()
+        ..shader = const RadialGradient(
+          colors: [Color(0xFFFFF4C2), Color(0xFFFF9A3D)],
+        ).createShader(Rect.fromCircle(center: fe, radius: r * 0.18)),
+    );
+    canvas.drawCircle(fe, r * 0.05, Paint()..color = Colors.white);
   }
 
   void _rainbow(Canvas canvas, Offset c, double r) {
