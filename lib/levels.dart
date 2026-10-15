@@ -244,8 +244,11 @@ int _distractorCount(int n) {
 // wordBank is loaded later by initializeWordBank().
 // Therefore we must read the current wordBank whenever
 // _pickWords() runs.
+List<String>? _cachedUniqueBank;
 
-List<String> get _uniqueBank => wordBank.toSet().toList();
+List<String> get _uniqueBank =>
+    _cachedUniqueBank ??= wordBank.toSet().toList();
+
 
 bool _conflicts(String w, List<String> picked) {
   for (final p in picked) {

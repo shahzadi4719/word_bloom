@@ -1,3 +1,4 @@
+
 name: my_first_app
 description: "A Flutter project for learning and building my first app."
 publish_to: 'none'
@@ -27,6 +28,12 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  fonts:
+    - family: Fredoka
+      fonts:
+        - asset: assets/fonts/Fredoka-Bold.ttf
+          weight: 700
 
   assets:
     - assets/images/

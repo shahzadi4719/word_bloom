@@ -237,7 +237,8 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
       });
     }
     _prevBonusLeft = bonusLeftNow;
-    if (_engine.gameOver && !_prevGameOver) SoundService.instance.play(Sfx.fail);
+    if (_engine.gameOver && !_prevGameOver)
+      SoundService.instance.play(Sfx.fail);
     _prevGameOver = _engine.gameOver;
 
     // NEW: praise when a word has just been completed.
@@ -498,332 +499,347 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
             ),
           ),
           SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final Size size = Size(
-                    constraints.maxWidth,
-                    constraints.maxHeight,
-                  );
+            child: Column(
+              children: [
+                Expanded(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final Size size = Size(
+                        constraints.maxWidth,
+                        constraints.maxHeight,
+                      );
 
-                  if (!_initialized) {
-                    _engine.configureForScreen(size);
-                    _engine.startLevel(widget.startLevel);
-                    _initialized = true;
-                    _aimY = _engine.boardTopY + 0.05;
-                    _showTutorial = widget.startLevel == 1;
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (mounted) _entranceController.forward(from: 0);
-                    });
-                  }
+                      if (!_initialized) {
+                        _engine.configureForScreen(size);
+                        _engine.startLevel(widget.startLevel);
+                        _initialized = true;
+                        _aimY = _engine.boardTopY + 0.05;
+                        _showTutorial = widget.startLevel == 1;
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (mounted) _entranceController.forward(from: 0);
+                        });
+                      }
 
-                  return GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onPanStart: (details) {
-                      if (_isPaused) return;
-                      _updateAim(details.localPosition, size);
-                      setState(() {
-                        _isAiming = true;
-                        _showTutorial = false;
-                      });
-                    },
-                    onPanUpdate: (details) {
-                      if (_isPaused) return;
-                      _updateAim(details.localPosition, size);
-                    },
-                    onPanEnd: (_) {
-                      if (_isPaused) return;
-                      if (_isAiming) _shoot();
-                      setState(() => _isAiming = false);
-                    },
-                    onPanCancel: () {
-                      if (_isPaused) return;
-                      setState(() => _isAiming = false);
-                    },
-                    // FIX: every child of this Stack has a stable key, so when
-                    // conditional widgets (aim line, toast, praise ...) appear
-                    // or disappear, the top bar / launcher keep their state
-                    // and the star bar no longer restarts from zero.
-                    child: Stack(
-                      children: [
-                        Positioned.fill(
-                          key: const ValueKey('bg'),
-                          child: const SizedBox.shrink(),
-                        ),
+                      return GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onPanStart: (details) {
+                          if (_isPaused) return;
+                          _updateAim(details.localPosition, size);
+                          setState(() {
+                            _isAiming = true;
+                            _showTutorial = false;
+                          });
+                        },
+                        onPanUpdate: (details) {
+                          if (_isPaused) return;
+                          _updateAim(details.localPosition, size);
+                        },
+                        onPanEnd: (_) {
+                          if (_isPaused) return;
+                          if (_isAiming) _shoot();
+                          setState(() => _isAiming = false);
+                        },
+                        onPanCancel: () {
+                          if (_isPaused) return;
+                          setState(() => _isAiming = false);
+                        },
+                        // FIX: every child of this Stack has a stable key, so when
+                        // conditional widgets (aim line, toast, praise ...) appear
+                        // or disappear, the top bar / launcher keep their state
+                        // and the star bar no longer restarts from zero.
+                        child: Stack(
+                          children: [
+                            Positioned.fill(
+                              key: const ValueKey('bg'),
+                              child: const SizedBox.shrink(),
+                            ),
 
-                        // GAME BOARD (board bubbles + bubbles that are falling off)
-                        Positioned.fill(
-                          key: const ValueKey('board'),
-                          child: AnimatedBuilder(
-                            animation: Listenable.merge([
-                              _entranceController,
-                              _flyingGlowController,
-                            ]),
-                            builder: (context, _) {
-                              return CustomPaint(
-                                painter: _GameBoardPainter(
-                                  bubbles: [
-                                    ..._engine.bubbles,
-                                    ..._engine.fallingBubbles,
+                            // GAME BOARD (board bubbles + bubbles that are falling off)
+                            Positioned.fill(
+                              key: const ValueKey('board'),
+                              child: AnimatedBuilder(
+                                animation: Listenable.merge([
+                                  _entranceController,
+                                  _flyingGlowController,
+                                ]),
+                                builder: (context, _) {
+                                  return CustomPaint(
+                                    painter: _GameBoardPainter(
+                                      bubbles: [
+                                        ..._engine.bubbles,
+                                        ..._engine.fallingBubbles,
+                                      ],
+                                      flyingBubble: _engine.flyingBubble,
+                                      flyingSpecial: _engine.flyingSpecial,
+                                      stoneIds: _engine.stoneIds,
+                                      lockHits: _engine.lockHits,
+                                      iceIds: _engine.iceIds,
+                                      hiddenIds: _engine.hiddenIds,
+                                      bombIds: _engine.bombIds,
+                                      wildIds: _engine.wildIds,
+                                      entranceProgress:
+                                          _entranceController.value,
+                                      flyingPulse: _flyingGlowController.value,
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+
+                            // BUBBLE POP EFFECT
+                            Positioned.fill(
+                              key: const ValueKey('pops'),
+                              child: CustomPaint(
+                                painter: _FlyingPopPainter(
+                                  pops: _engine.flyingPops,
+                                ),
+                              ),
+                            ),
+
+                            // BOOSTER EFFECTS (glow, petals, lightning beam)
+                            Positioned.fill(
+                              key: const ValueKey('booster_fx'),
+                              child: IgnorePointer(
+                                child: CustomPaint(
+                                  painter: _BoosterEffectPainter(
+                                    effects: _engine.boosterEffects,
+                                  ),
+                                ),
+                              ),
+                            ),
+
+                            // AIMING LINE - drawn from the engine's own simulation,
+                            // so it is exactly the path (and landing slot) of the shot.
+                            if (_isAiming &&
+                                !_engine.gameOver &&
+                                !_engine.levelComplete &&
+                                !_engine.shooting)
+                              Positioned.fill(
+                                key: const ValueKey('aim_line'),
+                                child: CustomPaint(
+                                  painter: _AimingLinePainter(
+                                    points: _engine
+                                        .previewShot(
+                                          letter: _engine
+                                              .getNextLetterPreview(),
+                                          startX: _muzzle.dx,
+                                          startY: _muzzle.dy,
+                                          targetX: _aimX,
+                                          targetY: _aimY,
+                                          special: _armedSpecial,
+                                        )
+                                        .path,
+                                    color: _armedSpecial == ShotSpecial.none
+                                        ? _bubbleColor(
+                                            _engine.getNextLetterPreview(),
+                                          )
+                                        : GameEngine.specialColor(
+                                            _armedSpecial,
+                                          ),
+                                  ),
+                                ),
+                              ),
+
+                            // (header band removed: the background picture shows
+                            // behind the top bar now)
+
+                            // TOP UI: pause | level + star progress | score
+                            Positioned(
+                              key: const ValueKey('top_bar'),
+                              top: 12,
+                              left: 14,
+                              right: 14,
+                              child: _TopBar(
+                                level: _engine.currentLevel?.number ?? 1,
+                                score: _coins,
+                                progress: _shownProgress,
+                                onPause: _openPauseMenu,
+                              ),
+                            ),
+
+                            // BUBBLE LAUNCHER RING
+                            Positioned(
+                              key: const ValueKey('launcher'),
+                              left: 0,
+                              right: 0,
+                              bottom: 0,
+                              child: SizedBox(
+                                height: 210,
+                                child: _LauncherRing(
+                                  currentLetter: _engine.getNextLetterPreview(),
+                                  nextLetter: _engine
+                                      .getLetterAfterNextPreview(),
+                                  currentColor:
+                                      _armedSpecial == ShotSpecial.none
+                                      ? _bubbleColor(
+                                          _engine.getNextLetterPreview(),
+                                        )
+                                      : GameEngine.specialColor(_armedSpecial),
+                                  armed: _armedSpecial == ShotSpecial.none
+                                      ? null
+                                      : _armed,
+                                  nextColor: _bubbleColor(
+                                    _engine.getLetterAfterNextPreview(),
+                                  ),
+                                  shotsRemaining: _remainingShots,
+                                  shotTrigger: _shotTrigger,
+                                  swapTrigger: _swapTrigger,
+                                  onSwapTap: _handleSwap,
+                                ),
+                              ),
+                            ),
+
+                            // LEFTOVER SHOTS flying out of the ring after a win
+                            Positioned.fill(
+                              key: const ValueKey('bonus_shots'),
+                              child: IgnorePointer(
+                                child: CustomPaint(
+                                  painter: _BonusShotPainter(
+                                    shots: _engine.bonusShots,
+                                    radiusFrac: _engine.bubbleRadius,
+                                  ),
+                                ),
+                              ),
+                            ),
+
+                            // WORD GOAL + OPTIONAL TIMER
+                            Positioned(
+                              key: const ValueKey('word_goal'),
+                              top: 68,
+                              left: 14,
+                              right: 14,
+                              child: IgnorePointer(
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    _WordGoalChip(
+                                      completed: _engine.completedWords.length,
+                                      total:
+                                          _engine.currentLevel?.words.length ??
+                                          1,
+                                    ),
+                                    if (_engine.timeLimit > 0) ...[
+                                      const SizedBox(width: 8),
+                                      _InfoChip(
+                                        icon: Icons.timer_rounded,
+                                        text: _formatTime(_engine.timeLeft),
+                                        color: _engine.timeLeft <= 10
+                                            ? const Color(0xFFE0554C)
+                                            : const Color(0xFF7A4A3A),
+                                      ),
+                                    ],
+                                    if (_armed != null) ...[
+                                      const SizedBox(width: 8),
+                                      _InfoChip(
+                                        icon: Icons.auto_awesome,
+                                        text:
+                                            '${boosterDef(_armed!).name} ready',
+                                        color: const Color(0xFFE0287F),
+                                      ),
+                                    ],
                                   ],
-                                  flyingBubble: _engine.flyingBubble,
-                                  flyingSpecial: _engine.flyingSpecial,
-                                  stoneIds: _engine.stoneIds,
-                                  lockHits: _engine.lockHits,
-                                  iceIds: _engine.iceIds,
-                                  hiddenIds: _engine.hiddenIds,
-                                  bombIds: _engine.bombIds,
-                                  wildIds: _engine.wildIds,
-                                  entranceProgress: _entranceController.value,
-                                  flyingPulse: _flyingGlowController.value,
                                 ),
-                              );
-                            },
-                          ),
-                        ),
-
-                        // BUBBLE POP EFFECT
-                        Positioned.fill(
-                          key: const ValueKey('pops'),
-                          child: CustomPaint(
-                            painter: _FlyingPopPainter(
-                              pops: _engine.flyingPops,
-                            ),
-                          ),
-                        ),
-
-                        // BOOSTER EFFECTS (glow, petals, lightning beam)
-                        Positioned.fill(
-                          key: const ValueKey('booster_fx'),
-                          child: IgnorePointer(
-                            child: CustomPaint(
-                              painter: _BoosterEffectPainter(
-                                effects: _engine.boosterEffects,
                               ),
                             ),
-                          ),
-                        ),
 
-                        // AIMING LINE - drawn from the engine's own simulation,
-                        // so it is exactly the path (and landing slot) of the shot.
-                        if (_isAiming &&
-                            !_engine.gameOver &&
-                            !_engine.levelComplete &&
-                            !_engine.shooting)
-                          Positioned.fill(
-                            key: const ValueKey('aim_line'),
-                            child: CustomPaint(
-                              painter: _AimingLinePainter(
-                                points: _engine
-                                    .previewShot(
-                                      letter: _engine.getNextLetterPreview(),
-                                      startX: _muzzle.dx,
-                                      startY: _muzzle.dy,
-                                      targetX: _aimX,
-                                      targetY: _aimY,
-                                      special: _armedSpecial,
-                                    )
-                                    .path,
-                                color: _armedSpecial == ShotSpecial.none
-                                    ? _bubbleColor(
-                                        _engine.getNextLetterPreview(),
-                                      )
-                                    : GameEngine.specialColor(_armedSpecial),
-                              ),
-                            ),
-                          ),
-
-                        // (header band removed: the background picture shows
-                        // behind the top bar now)
-
-                        // TOP UI: pause | level + star progress | score
-                        Positioned(
-                          key: const ValueKey('top_bar'),
-                          top: 12,
-                          left: 14,
-                          right: 14,
-                          child: _TopBar(
-                            level: _engine.currentLevel?.number ?? 1,
-                            score: _coins,
-                            progress: _shownProgress,
-                            onPause: _openPauseMenu,
-                          ),
-                        ),
-
-                        // BUBBLE LAUNCHER RING
-                        Positioned(
-                          key: const ValueKey('launcher'),
-                          left: 0,
-                          right: 0,
-                          bottom: 0,
-                          child: SizedBox(
-                            height: 210,
-                            child: _LauncherRing(
-                              currentLetter: _engine.getNextLetterPreview(),
-                              nextLetter: _engine.getLetterAfterNextPreview(),
-                              currentColor: _armedSpecial == ShotSpecial.none
-                                  ? _bubbleColor(
-                                      _engine.getNextLetterPreview(),
-                                    )
-                                  : GameEngine.specialColor(_armedSpecial),
-                              armed: _armedSpecial == ShotSpecial.none
-                                  ? null
-                                  : _armed,
-                              nextColor: _bubbleColor(
-                                _engine.getLetterAfterNextPreview(),
-                              ),
-                              shotsRemaining: _remainingShots,
-                              shotTrigger: _shotTrigger,
-                              swapTrigger: _swapTrigger,
-                              onSwapTap: _handleSwap,
-                            ),
-                          ),
-                        ),
-
-                        // LEFTOVER SHOTS flying out of the ring after a win
-                        Positioned.fill(
-                          key: const ValueKey('bonus_shots'),
-                          child: IgnorePointer(
-                            child: CustomPaint(
-                              painter: _BonusShotPainter(
-                                shots: _engine.bonusShots,
-                                radiusFrac: _engine.bubbleRadius,
-                              ),
-                            ),
-                          ),
-                        ),
-
-                        // WORD GOAL + OPTIONAL TIMER
-                        Positioned(
-                          key: const ValueKey('word_goal'),
-                          top: 68,
-                          left: 14,
-                          right: 14,
-                          child: IgnorePointer(
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                _WordGoalChip(
-                                  completed: _engine.completedWords.length,
-                                  total:
-                                      _engine.currentLevel?.words.length ?? 1,
-                                ),
-                                if (_engine.timeLimit > 0) ...[
-                                  const SizedBox(width: 8),
-                                  _InfoChip(
-                                    icon: Icons.timer_rounded,
-                                    text: _formatTime(_engine.timeLeft),
-                                    color: _engine.timeLeft <= 10
-                                        ? const Color(0xFFE0554C)
-                                        : const Color(0xFF7A4A3A),
+                            // TOAST: why a word didn't count
+                            if (_engine.toastMessage != null)
+                              Positioned(
+                                key: const ValueKey('toast'),
+                                top: 118,
+                                left: 24,
+                                right: 24,
+                                child: IgnorePointer(
+                                  child: Center(
+                                    child: _ToastPill(
+                                      text: _engine.toastMessage!,
+                                    ),
                                   ),
-                                ],
-                                if (_armed != null) ...[
-                                  const SizedBox(width: 8),
-                                  _InfoChip(
-                                    icon: Icons.auto_awesome,
-                                    text: '${boosterDef(_armed!).name} ready',
-                                    color: const Color(0xFFE0287F),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                        ),
-
-                        // TOAST: why a word didn't count
-                        if (_engine.toastMessage != null)
-                          Positioned(
-                            key: const ValueKey('toast'),
-                            top: 118,
-                            left: 24,
-                            right: 24,
-                            child: IgnorePointer(
-                              child: Center(
-                                child: _ToastPill(text: _engine.toastMessage!),
-                              ),
-                            ),
-                          ),
-
-                        // FOUND WORD
-                        if (_engine.foundWord != null)
-                          Positioned(
-                            key: const ValueKey('found_word'),
-                            top: 150,
-                            left: 0,
-                            right: 0,
-                            child: Center(
-                              child: _FoundWord(
-                                word: _engine.foundWord!,
-                                done: _engine.completedWords.length,
-                                total: _engine.currentLevel?.words.length ?? 1,
-                              ),
-                            ),
-                          ),
-
-                        // PRAISE ("Nice!", "Great!" ...)
-                        if (_praise != null)
-                          Positioned.fill(
-                            key: const ValueKey('praise_slot'),
-                            child: IgnorePointer(
-                              child: Align(
-                                alignment: const Alignment(0, -0.2),
-                                child: _PraisePopup(
-                                  key: ValueKey(_praiseId),
-                                  text: _praise!,
                                 ),
                               ),
-                            ),
-                          ),
 
-                        // GAME OVER
-                        if (_engine.gameOver)
-                          Positioned.fill(
-                            key: const ValueKey('game_over'),
-                            child: _GameOverOverlay(
-                              onPressed: _restartAndRetry,
-                              message: _engine.timeUp
-                                  ? "Time's up!"
-                                  : 'You ran out of shots',
-                            ),
-                          ),
+                            // FOUND WORD
+                            if (_engine.foundWord != null)
+                              Positioned(
+                                key: const ValueKey('found_word'),
+                                top: 150,
+                                left: 0,
+                                right: 0,
+                                child: Center(
+                                  child: _FoundWord(
+                                    word: _engine.foundWord!,
+                                    done: _engine.completedWords.length,
+                                    total:
+                                        _engine.currentLevel?.words.length ?? 1,
+                                  ),
+                                ),
+                              ),
 
-                        // LEVEL COMPLETE
-                        if (_engine.levelComplete)
-                          Positioned.fill(
-                            key: const ValueKey('level_complete'),
-                            child: _LevelCompleteOverlay(
-                              confettiController: _confettiController,
-                              score: _engine.score,
-                              stars: _engine.starsEarned,
-                              completedWords: _engine.completedWords,
-                              letterColors: _engine.letterColors,
-                              onPressed: _goNext,
-                            ),
-                          ),
-                        // FIRST-SHOT TUTORIAL
-                        if (_showTutorial)
-                          Positioned.fill(
-                            key: const ValueKey('tutorial'),
-                            child: IgnorePointer(
-                              ignoring: true,
-                              child: _TutorialOverlay(),
-                            ),
-                          ),
-                      ],
-                    ),
-                  );
-                },
-              ),
+                            // PRAISE ("Nice!", "Great!" ...)
+                            if (_praise != null)
+                              Positioned.fill(
+                                key: const ValueKey('praise_slot'),
+                                child: IgnorePointer(
+                                  child: Align(
+                                    alignment: const Alignment(0, -0.2),
+                                    child: _PraisePopup(
+                                      key: ValueKey(_praiseId),
+                                      text: _praise!,
+                                    ),
+                                  ),
+                                ),
+                              ),
+
+                            // GAME OVER
+                            if (_engine.gameOver)
+                              Positioned.fill(
+                                key: const ValueKey('game_over'),
+                                child: _GameOverOverlay(
+                                  onPressed: _restartAndRetry,
+                                  message: _engine.timeUp
+                                      ? "Time's up!"
+                                      : 'You ran out of shots',
+                                ),
+                              ),
+
+                            // LEVEL COMPLETE
+                            if (_engine.levelComplete)
+                              Positioned.fill(
+                                key: const ValueKey('level_complete'),
+                                child: _LevelCompleteOverlay(
+                                  confettiController: _confettiController,
+                                  score: _engine.score,
+                                  stars: _engine.starsEarned,
+                                  completedWords: _engine.completedWords,
+                                  letterColors: _engine.letterColors,
+                                  onPressed: _goNext,
+                                ),
+                              ),
+                            // FIRST-SHOT TUTORIAL
+                            if (_showTutorial)
+                              Positioned.fill(
+                                key: const ValueKey('tutorial'),
+                                child: IgnorePointer(
+                                  ignoring: true,
+                                  child: _TutorialOverlay(),
+                                ),
+                              ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+
+                // BOOSTER BAR - below the game area, never over the shooter.
+                BoosterBar(
+                  service: _boosters,
+                  armed: _armed,
+                  onTap: _onBoosterTap,
+                ),
+              ],
             ),
-
-            // BOOSTER BAR - below the game area, never over the shooter.
-            BoosterBar(service: _boosters, armed: _armed, onTap: _onBoosterTap),
-          ],
-        ),
-      ),
+          ),
         ],
       ),
     );

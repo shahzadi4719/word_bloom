@@ -1,6 +1,6 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+
 
 import '../sound_service.dart';
 import 'level_select_screen.dart';
@@ -170,20 +170,23 @@ class _StartButtonState extends State<_StartButton>
             const SizedBox(width: 12),
             Text(
               'START BLOOMING',
-              style: GoogleFonts.fredoka(
-                color: Colors.white,
-                fontWeight: FontWeight.w700,
-                fontSize: 19,
-                letterSpacing: 1.0,
-                shadows: const [
-                  Shadow(
-                    color: Color(0x4D000000),
-                    blurRadius: 3,
-                    offset: Offset(0, 1.5),
-                  ),
-                ],
-              ),
+              
+style: const TextStyle(
+  fontFamily: 'Fredoka',
+  color: Colors.white,
+  fontWeight: FontWeight.w700,
+  fontSize: 19,
+  letterSpacing: 1.0,
+  shadows: [
+    Shadow(
+      color: Color(0x4D000000),
+      blurRadius: 3,
+      offset: Offset(0, 1.5),
+    ),
+  ],
+),
             ),
+
             const SizedBox(width: 12),
             const _MiniFlower(size: 28),
           ],

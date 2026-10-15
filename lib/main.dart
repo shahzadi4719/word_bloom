@@ -7,10 +7,28 @@ import 'sound_service.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await initializeWordBank();
-  generateLevels();
+  final stopwatch = Stopwatch()..start();
 
+  await initializeWordBank();
+  debugPrint(
+    'STARTUP TIME: Word bank = ${stopwatch.elapsedMilliseconds} ms',
+  );
+
+  final levelTimer = Stopwatch()..start();
+  generateLevels();
+  debugPrint(
+    'STARTUP TIME: Generate levels = ${levelTimer.elapsedMilliseconds} ms',
+  );
+
+  final soundTimer = Stopwatch()..start();
   await SoundService.instance.ensureStarted();
+  debugPrint(
+    'STARTUP TIME: Sound service = ${soundTimer.elapsedMilliseconds} ms',
+  );
+
+  debugPrint(
+    'STARTUP TIME: Total before runApp = ${stopwatch.elapsedMilliseconds} ms',
+  );
 
   runApp(const WordBloomApp());
 }
