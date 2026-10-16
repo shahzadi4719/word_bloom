@@ -1,3 +1,4 @@
+
 import 'dart:math';
 import 'word_dictionary.dart';
 
@@ -15,7 +16,7 @@ class GameLevel {
   final int maxShots;
 
   final int world; // 1..8
-  final String difficulty; // label for UI
+  final String difficulty;
 
   /// 0 = none. Metadata for future special bubbles.
   final int specialTier;
@@ -39,7 +40,8 @@ class GameLevel {
 
   int get maxWordLength => words.map((w) => w.length).reduce(max);
 
-  int get totalRequiredLetters => words.fold<int>(0, (t, w) => t + w.length);
+  int get totalRequiredLetters =>
+      words.fold<int>(0, (t, w) => t + w.length);
 }
 
 // ============================================================
@@ -50,6 +52,10 @@ List<String> wordBank = [];
 
 Future<void> initializeWordBank() async {
   wordBank = (await loadWordList()).toList();
+
+  // Reset caches in case the word bank is loaded again.
+  _cachedUniqueBank = null;
+  _wordPoolCache.clear();
 }
 
 // ============================================================
@@ -132,19 +138,6 @@ String worldNameFor(int n) => worldNames[worldFor(n) - 1];
 // ============================================================
 // HOW MANY WORDS PER LEVEL
 // ============================================================
-//
-// 1   - 5     => 1
-// 6   - 15    => 2
-// 16  - 60    => 3
-// 61  - 200   => 4
-// 201 - 400   => 5
-// 401 - 900   => 6
-// 901 - 1600  => 7
-// 1601- 2000  => 8
-//
-// Mobile players don't enjoy 12-word levels, so the count stops
-// at 8. Difficulty comes from word length + obstacles instead.
-// ============================================================
 
 int wordCountForLevel(int n) {
   if (n <= 5) return 1;
@@ -160,30 +153,13 @@ int wordCountForLevel(int n) {
 // ============================================================
 // WORD LENGTH PROGRESSION
 // ============================================================
-//
-// 1    - 30    => 3 letters
-// 31   - 60    => 3 to 4 letters
-// 61   - 200   => 4 letters
-// 201  - 400   => 4 to 5 letters
-// 401  - 700   => 5 letters
-// 701  - 1100  => 5 to 6 letters
-// 1101 - 2000  => 6 to 7 letters
-//
-// The game engine uses the same table (lengthRangeFor) to decide
-// which dictionary words are allowed to pop on each level.
-// ============================================================
 
 List<int> _lengthRange(int n) {
   if (n <= 30) return [3, 3];
-
   if (n <= 60) return [3, 4];
-
   if (n <= 200) return [4, 4];
-
   if (n <= 400) return [4, 5];
-
   if (n <= 700) return [5, 5];
-
   if (n <= 1100) return [5, 6];
 
   return [6, 7];
@@ -195,6 +171,7 @@ List<int> lengthRangeFor(int n) => _lengthRange(n);
 /// Public: label for the level preview dialog.
 String lengthLabelFor(int n) {
   final r = _lengthRange(n);
+
   return r[0] == r[1]
       ? '${r[0]} LETTER WORDS'
       : '${r[0]}–${r[1]} LETTER WORDS';
@@ -210,6 +187,7 @@ int _hintCountForLevel(int n) {
   if (n <= 300) return n.isEven ? 2 : 1;
   if (n <= 500) return 1;
   if (n <= 1000) return n % 3 == 0 ? 1 : 0;
+
   return n % 25 == 0 ? 1 : 0;
 }
 
@@ -218,6 +196,7 @@ int _specialTierFor(int n) {
   if (n <= 300) return n % 8 == 0 ? 1 : 0;
   if (n <= 500) return n % 6 == 0 ? 2 : 0;
   if (n <= 1000) return n % 4 == 0 ? 3 : 0;
+
   return n % 3 == 0 ? 4 : 0;
 }
 
@@ -231,24 +210,33 @@ int _distractorCount(int n) {
   if (n <= 350) return 12;
   if (n <= 500) return 14;
   if (n <= 750) return 16;
+
   return 18;
 }
 
 // ============================================================
-// WORD SELECTION
+// WORD SELECTION — OPTIMIZED
 // ============================================================
 
-// IMPORTANT:
-// This is a getter, not a final variable.
-//
-// wordBank is loaded later by initializeWordBank().
-// Therefore we must read the current wordBank whenever
-// _pickWords() runs.
+// Create the unique word list only once.
 List<String>? _cachedUniqueBank;
 
 List<String> get _uniqueBank =>
     _cachedUniqueBank ??= wordBank.toSet().toList();
 
+// Cache words for each length range.
+// For example, the 3–3 pool is created only once and reused.
+final Map<String, List<String>> _wordPoolCache = {};
+
+List<String> _getWordPool(int lo, int hi) {
+  final key = '$lo-$hi';
+
+  return _wordPoolCache.putIfAbsent(key, () {
+    return _uniqueBank
+        .where((w) => w.length >= lo && w.length <= hi)
+        .toList();
+  });
+}
 
 bool _conflicts(String w, List<String> picked) {
   for (final p in picked) {
@@ -262,28 +250,51 @@ bool _conflicts(String w, List<String> picked) {
 
 List<String> _pickWords(int n, Random rnd) {
   final int count = wordCountForLevel(n);
-
   final List<int> range = _lengthRange(n);
 
   final int lo = range[0];
   final int hi = range[1];
 
+  final List<String> pool = _getWordPool(lo, hi);
   final List<String> picked = [];
 
-  final pool =
-      _uniqueBank.where((w) => w.length >= lo && w.length <= hi).toList()
-        ..shuffle(rnd);
+  if (pool.isEmpty) {
+    return picked;
+  }
 
-  for (final w in pool) {
-    if (picked.length >= count) {
-      break;
-    }
+  // Try random candidates without shuffling the whole pool.
+  // A set prevents selecting the same pool index twice.
+  final Set<int> tried = {};
+  final int maxAttempts = min(pool.length, count * 50);
 
-    if (_conflicts(w, picked)) {
+  for (int attempt = 0;
+      attempt < maxAttempts && picked.length < count;
+      attempt++) {
+    final int index = rnd.nextInt(pool.length);
+
+    if (!tried.add(index)) {
       continue;
     }
 
-    picked.add(w);
+    final String word = pool[index];
+
+    if (!_conflicts(word, picked)) {
+      picked.add(word);
+    }
+  }
+
+  // Fallback: scan the remaining pool if random selection
+  // did not find enough non-conflicting words.
+  if (picked.length < count) {
+    for (final word in pool) {
+      if (picked.length >= count) {
+        break;
+      }
+
+      if (!_conflicts(word, picked)) {
+        picked.add(word);
+      }
+    }
   }
 
   return picked;
@@ -293,13 +304,19 @@ List<String> _pickWords(int n, Random rnd) {
 // LETTERS
 // ============================================================
 
-List<String> _createLetters(List<String> words, int n, Random rnd) {
+List<String> _createLetters(
+  List<String> words,
+  int n,
+  Random rnd,
+) {
   final letters = <String>[];
 
+  // Every target word's letters must be present.
   for (final word in words) {
     letters.addAll(word.split(''));
   }
 
+  // Add random distractor letters.
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
   for (int i = 0; i < _distractorCount(n); i++) {
@@ -330,35 +347,22 @@ List<String> _createHints(List<String> words, int n) {
 // ============================================================
 // SHOTS
 // ============================================================
-//
-// shots = (total letters of the level's words) x ratio
-//
-// The ratio goes UP with the level (2.2 -> 3.0): longer words are
-// much harder to chain from random board letters, so late levels
-// need more shots per letter, not fewer.
-//
-// Never below 24 (+1 every 60 levels), and never below
-// required letters + 12.
-//
-//   level 1     -> 24
-//   level 84    -> ~36
-//   level 300   -> ~52
-//   level 1000  -> ~100
-//   level 2000  -> ~156
-// ============================================================
 
-double _shotRatio(int n) => 2.2 + (n.clamp(1, 2000) / 2000) * 0.8;
+double _shotRatio(int n) =>
+    2.2 + (n.clamp(1, 2000) / 2000) * 0.8;
 
 int _calculateMaxShots(List<String> words, int n, Random rnd) {
-  final int required = words.fold<int>(0, (t, w) => t + w.length);
+  final int required =
+      words.fold<int>(0, (t, w) => t + w.length);
 
   final int byLetters = (required * _shotRatio(n)).round();
   final int floorShots = 24 + n ~/ 60;
 
-  // tiny random variation so neighbouring levels don't feel identical
+  // Tiny random variation between neighbouring levels.
   final int wiggle = n <= 5 ? 0 : rnd.nextInt(3);
 
-  return max(max(byLetters, floorShots), required + 12) + wiggle;
+  return max(max(byLetters, floorShots), required + 12) +
+      wiggle;
 }
 
 // ============================================================
@@ -368,7 +372,7 @@ int _calculateMaxShots(List<String> words, int n, Random rnd) {
 bool _isValid(GameLevel level) {
   final n = level.number;
 
-  // Correct number of words.
+  // Correct number of target words.
   if (level.words.length != wordCountForLevel(n)) {
     return false;
   }
@@ -378,8 +382,7 @@ bool _isValid(GameLevel level) {
     return false;
   }
 
-  // Validate words and prevent one word
-  // from containing another.
+  // Validate words and prevent one word from containing another.
   for (int i = 0; i < level.words.length; i++) {
     final a = level.words[i];
 
@@ -396,8 +399,7 @@ bool _isValid(GameLevel level) {
     }
   }
 
-  // Check that all required letters
-  // actually exist in the level.
+  // Verify that every required letter exists.
   final need = <String, int>{};
 
   for (final w in level.words) {
@@ -437,8 +439,8 @@ GameLevel _createLevel(int n) {
 
   GameLevel? last;
 
-  // Seeded, so level N is the same every time
-  // the app opens.
+  // Seeded generation: level N remains deterministic for
+  // the same word bank and generation algorithm.
   for (int attempt = 0; attempt < 20; attempt++) {
     final rnd = Random(n * 7919 + attempt * 104729);
 
@@ -467,6 +469,7 @@ GameLevel _createLevel(int n) {
   }
 
   // Safety fallback.
+  // This should be rare; test the word bank if it occurs.
   return last ??
       GameLevel(
         number: n,
@@ -484,7 +487,10 @@ GameLevel _createLevel(int n) {
 late List<GameLevel> levels;
 
 void generateLevels() {
-  levels = List.generate(totalAutoLevels, (index) => _createLevel(index + 1));
+  levels = List.generate(
+    totalAutoLevels,
+    (index) => _createLevel(index + 1),
+  );
 }
 
 GameLevel getLevel(int levelNumber) {

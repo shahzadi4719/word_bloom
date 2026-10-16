@@ -513,12 +513,12 @@ class _RoadPainter extends CustomPainter {
     canvas.drawPath(
       path.shift(const Offset(0, 5)),
       stroke(60)
-        ..color = const Color(0x33B5588F)
+        ..color = const Color(0x22E58AB8)
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10),
     );
 
     // Soft pink outer rim (no white)
-    canvas.drawPath(path, stroke(58)..color = const Color(0xAAF58BBE));
+    canvas.drawPath(path, stroke(58)..color = const Color(0x88FFB6D5));
 
     // Main ribbon (deeper pink -> lilac, matches background)
     canvas.drawPath(
@@ -527,15 +527,15 @@ class _RoadPainter extends CustomPainter {
         ..shader = const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xEEF7A3CB), Color(0xEEC9A4EC), Color(0xEEF7A3CB)],
+          colors: [Color(0xCCFFD0E5), Color(0xCCEBD3FA), Color(0xCCFFD0E5)],
         ).createShader(Offset.zero & size),
     );
 
     // Slightly lighter inner lane (pink tint, not white)
-    canvas.drawPath(path, stroke(28)..color = const Color(0x44FFC2DE));
+    canvas.drawPath(path, stroke(28)..color = const Color(0x55FFEAF3));
 
     // Thin soft highlight
-    canvas.drawPath(path, stroke(3)..color = const Color(0x66FFE0EE));
+    canvas.drawPath(path, stroke(3)..color = const Color(0x88FFF3F8));
   }
 
   @override
@@ -561,7 +561,7 @@ class _LevelNode extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final List<Color> sphereColors = current
-        ? const [Color(0xFFC9A8F5), Color(0xFF7E4FCF)]
+        ? const [Color(0xFFFFD0B0), Color(0xFFF2845C)]
         : unlocked
         ? const [Color(0xFFFFB3D1), Color(0xFFE0388C)]
         : const [Color(0xFFDDD0EA), Color(0xFFB2A2C6)];
@@ -604,7 +604,7 @@ class _LevelNode extends StatelessWidget {
                     BoxShadow(
                       color:
                           (current
-                                  ? const Color(0xFF8E5CE0)
+                                  ? const Color(0xFFF5A27E)
                                   : const Color(0xFFE0388C))
                               .withValues(alpha: current ? 0.5 : 0.28),
                       blurRadius: current ? 20 : 12,
@@ -778,7 +778,7 @@ class _ArrowPainter extends CustomPainter {
     canvas.drawPath(
       arrow,
       Paint()
-        ..color = const Color(0x888E5CE0)
+        ..color = const Color(0x88F5A27E)
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8),
     );
 
@@ -789,7 +789,7 @@ class _ArrowPainter extends CustomPainter {
         ..shader = const LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [Color(0xFFC9A8F5), Color(0xFF7E4FCF)],
+          colors: [Color(0xFFFFD0B0), Color(0xFFF2845C)],
         ).createShader(const Rect.fromLTWH(0, 0, 44, 52)),
     );
 
@@ -800,7 +800,7 @@ class _ArrowPainter extends CustomPainter {
         ..style = PaintingStyle.stroke
         ..strokeWidth = 3
         ..strokeJoin = StrokeJoin.round
-        ..color = const Color(0xFF5B34A8),
+        ..color = const Color(0xFFB5502E),
     );
 
     // glossy highlight on the shaft
@@ -860,14 +860,14 @@ class _PedestalGlowState extends State<_PedestalGlow>
               borderRadius: const BorderRadius.all(Radius.elliptical(56, 26)),
               gradient: RadialGradient(
                 colors: [
-                  const Color(0xFF8E5CE0).withValues(alpha: 0.35 + 0.35 * t),
-                  const Color(0xFF8E5CE0).withValues(alpha: 0.12 + 0.1 * t),
+                  const Color(0xFFF5A27E).withValues(alpha: 0.35 + 0.35 * t),
+                  const Color(0xFFF5A27E).withValues(alpha: 0.12 + 0.1 * t),
                 ],
               ),
               boxShadow: [
                 BoxShadow(
                   color: const Color(
-                    0xFFFF4F9F,
+                    0xFFFFB08A,
                   ).withValues(alpha: 0.35 + 0.35 * t),
                   blurRadius: 18 + 12 * t,
                   spreadRadius: 2 + 4 * t,

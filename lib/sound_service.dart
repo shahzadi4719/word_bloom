@@ -5,7 +5,7 @@ import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// All the short sound effects of the game.
-enum Sfx { click, pop, shoot, land, word, coin, confetti, gift, fail, reward, bonusPop, bonusCoin, success }
+enum Sfx { click, pop, shoot, land, word, coin, confetti, gift, giftUnlock, collect, fail, reward, bonusPop, bonusCoin, success }
 
 /// One place for ALL game audio (button clicks, pops, confetti, music).
 ///
@@ -40,6 +40,8 @@ class SoundService with WidgetsBindingObserver {
     Sfx.coin: 'audio/coin.wav',
     Sfx.confetti: 'audio/confetti.wav',
     Sfx.gift: 'audio/gift.wav',
+    Sfx.giftUnlock: 'audio/gift_unlock.wav',
+    Sfx.collect: 'audio/collect.wav',
     Sfx.fail: 'audio/fail.wav',
     Sfx.reward: 'audio/reward.wav',
     Sfx.bonusPop: 'audio/bonus_pop.wav',
@@ -56,7 +58,9 @@ class SoundService with WidgetsBindingObserver {
     Sfx.coin: 0.9,
     Sfx.confetti: 1.0,
     Sfx.gift: 1.0,
-    Sfx.fail: 0.85,
+    Sfx.giftUnlock: 1.0,
+    Sfx.collect: 1.0,
+    Sfx.fail: 1.0,
     Sfx.reward: 1.0,
     Sfx.bonusPop: 0.9,
     Sfx.bonusCoin: 0.9,

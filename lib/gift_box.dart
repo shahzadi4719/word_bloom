@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -614,17 +615,16 @@ class GiftPathLayer extends StatelessWidget {
 
 /// Shows the full-screen "opening" animation with the rewards.
 /// (Rewards are already saved by GiftService.open before this is shown.)
+///
+/// The closed box drops in (unlock sound) and waits. It only opens when the
+/// player TAPS it. [coinTargetKey] = key of the coin counter widget; coins fly
+/// there when COLLECT is pressed (falls back to the top-right corner).
 Future<void> showGiftOpenDialog(
   BuildContext context,
-  List<GiftReward> rewards,
-) {
-  SoundService.instance.play(Sfx.gift); // box opens
-  // One sound when the rewards appear: coins -> reward, anything else -> success
-  Future<void>.delayed(const Duration(milliseconds: 2300), () {
-    SoundService.instance.play(
-      rewards.any((r) => r.isCoins) ? Sfx.reward : Sfx.success,
-    );
-  });
+  List<GiftReward> rewards, {
+  GlobalKey? coinTargetKey,
+}) {
+  SoundService.instance.play(Sfx.giftUnlock); // gift appears on screen
   return showGeneralDialog<void>(
     context: context,
     barrierDismissible: false,
@@ -633,6 +633,7 @@ Future<void> showGiftOpenDialog(
     transitionDuration: const Duration(milliseconds: 250),
     pageBuilder: (ctx, _, __) => _GiftOpenOverlay(
       rewards: rewards,
+      coinTargetKey: coinTargetKey,
       onDone: () => Navigator.of(ctx).pop(),
     ),
     transitionBuilder: (ctx, anim, _, child) =>
@@ -659,8 +660,13 @@ class _Particle {
 class _GiftOpenOverlay extends StatefulWidget {
   final List<GiftReward> rewards;
   final VoidCallback onDone;
+  final GlobalKey? coinTargetKey;
 
-  const _GiftOpenOverlay({required this.rewards, required this.onDone});
+  const _GiftOpenOverlay({
+    required this.rewards,
+    required this.onDone,
+    this.coinTargetKey,
+  });
 
   @override
   State<_GiftOpenOverlay> createState() => _GiftOpenOverlayState();
@@ -670,7 +676,17 @@ class _GiftOpenOverlayState extends State<_GiftOpenOverlay>
     with TickerProviderStateMixin {
   late final AnimationController _seq;
   late final AnimationController _loop;
+  late final AnimationController _fly; // coins flying to the counter
   late final List<_Particle> _particles;
+
+  /// The box waits closed until the player taps it.
+  static const double _waitAt = 0.16;
+  bool _tapped = false;
+  bool _collecting = false;
+  Timer? _rewardTimer;
+  final GlobalKey _coinIconKey = GlobalKey();
+  Offset? _flyStart;
+  Offset? _flyEnd;
 
   @override
   void initState() {
@@ -691,7 +707,16 @@ class _GiftOpenOverlayState extends State<_GiftOpenOverlay>
     _seq = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 5200),
-    )..forward();
+    )..animateTo(
+        _waitAt,
+        duration: const Duration(milliseconds: 832),
+        curve: Curves.linear,
+      );
+
+    _fly = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+    );
 
     _loop = AnimationController(
       vsync: this,
@@ -701,9 +726,88 @@ class _GiftOpenOverlayState extends State<_GiftOpenOverlay>
 
   @override
   void dispose() {
+    _rewardTimer?.cancel();
     _seq.dispose();
     _loop.dispose();
+    _fly.dispose();
     super.dispose();
+  }
+
+  /// Player taps the closed box -> it shakes, opens and shows the rewards.
+  void _onBoxTap() {
+    if (_tapped || _seq.value < _waitAt - 0.01) return;
+    _tapped = true;
+    SoundService.instance.play(Sfx.gift); // box opens
+    // one sound when the rewards appear (same moment as before)
+    _rewardTimer = Timer(const Duration(milliseconds: 1456), () {
+      SoundService.instance.play(
+        widget.rewards.any((r) => r.isCoins) ? Sfx.reward : Sfx.success,
+      );
+    });
+    _seq.forward();
+    setState(() {});
+  }
+
+  /// COLLECT: coins fly up to the coin counter (with a sound), then close.
+  void _collect() {
+    if (_collecting) return;
+    _collecting = true;
+
+    final bool hasCoins = widget.rewards.any((r) => r.isCoins);
+    final RenderObject? me = context.findRenderObject();
+    final RenderObject? coin = _coinIconKey.currentContext?.findRenderObject();
+    if (!hasCoins || me is! RenderBox || coin is! RenderBox) {
+      SoundService.instance.click();
+      widget.onDone();
+      return;
+    }
+
+    Offset? end;
+    final RenderObject? t = widget.coinTargetKey?.currentContext
+        ?.findRenderObject();
+    if (t is RenderBox && t.attached) {
+      end = me.globalToLocal(t.localToGlobal(t.size.center(Offset.zero)));
+    }
+    end ??= Offset(
+      me.size.width - 54,
+      MediaQuery.of(context).padding.top + 34,
+    );
+
+    _flyStart = me.globalToLocal(coin.localToGlobal(coin.size.center(Offset.zero)));
+    _flyEnd = end;
+    SoundService.instance.play(Sfx.collect);
+    setState(() {});
+    _fly.forward().whenComplete(() {
+      if (mounted) widget.onDone();
+    });
+  }
+
+  Widget _flyLayer() {
+    final Offset? s = _flyStart;
+    final Offset? e = _flyEnd;
+    if (s == null || e == null) return const SizedBox.shrink();
+    const int n = 9;
+    final List<Widget> coins = <Widget>[];
+    for (int i = 0; i < n; i++) {
+      final double p = ((_fly.value - i * 0.05) / 0.55).clamp(0.0, 1.0);
+      if (p <= 0 || p >= 1) continue;
+      final double t = Curves.easeInOut.transform(p);
+      final Offset a = s + Offset((i - 4) * 6.0, 0);
+      final Offset c = Offset((a.dx + e.dx) / 2 + (i - 4) * 14, a.dy - 90);
+      final double u = 1 - t;
+      final Offset pos = a * (u * u) + c * (2 * u * t) + e * (t * t);
+      final double sz = 30 * (1 - 0.35 * t);
+      coins.add(
+        Positioned(
+          left: pos.dx - sz / 2,
+          top: pos.dy - sz / 2,
+          width: sz,
+          height: sz,
+          child: const CustomPaint(painter: _CoinPainter()),
+        ),
+      );
+    }
+    return Stack(clipBehavior: Clip.none, children: coins);
   }
 
   double _seg(double a, double b) =>
@@ -713,18 +817,29 @@ class _GiftOpenOverlayState extends State<_GiftOpenOverlay>
   Widget build(BuildContext context) {
     return Material(
       type: MaterialType.transparency,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final double boxSize = (constraints.maxHeight * 0.20).clamp(
-            100.0,
-            140.0,
-          );
-          final double cardW = min(constraints.maxWidth - 40, 340.0);
-          return AnimatedBuilder(
-            animation: Listenable.merge([_seq, _loop]),
-            builder: (context, _) => _content(boxSize, cardW),
-          );
-        },
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final double boxSize = (constraints.maxHeight * 0.20).clamp(
+                100.0,
+                140.0,
+              );
+              final double cardW = min(constraints.maxWidth - 40, 340.0);
+              return AnimatedBuilder(
+                animation: Listenable.merge([_seq, _loop]),
+                builder: (context, _) => _content(boxSize, cardW),
+              );
+            },
+          ),
+          IgnorePointer(
+            child: AnimatedBuilder(
+              animation: _fly,
+              builder: (context, _) => _flyLayer(),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -745,13 +860,16 @@ class _GiftOpenOverlayState extends State<_GiftOpenOverlay>
     final double loop = _loop.value;
 
     // box motion: drop in -> shake harder and harder -> POP -> float
-    final double rot = v >= 0.38 ? 0 : sin(shakeP * pi * 12) * 0.16 * shakeP;
-    double scale = 1 + 0.10 * shakeP;
+    final double idle = _tapped ? 0.0 : 1.0; // waiting for the tap
+    final double rot =
+        (v >= 0.38 ? 0.0 : sin(shakeP * pi * 12) * 0.16 * shakeP) +
+        idle * sin(loop * 2 * pi * 3) * 0.06;
+    double scale = 1 + 0.10 * shakeP + idle * 0.03 * sin(loop * 2 * pi * 2);
     if (v >= 0.38) {
       scale = 1.10 + 0.16 * sin(cRaw * pi) - 0.10 * settle;
     }
     final double bob = sin(loop * 2 * pi) * 5 * settle;
-    final double areaH = boxSize * 1.45;
+    final double areaH = boxSize * 1.6;
     final double dropY = -(1 - drop) * areaH;
     final double lidOpacity = (1 - ((open - 0.55) / 0.45)).clamp(0.0, 1.0);
     final double glow = v < 0.38 ? shakeP : (1 - cRaw);
@@ -838,19 +956,45 @@ class _GiftOpenOverlayState extends State<_GiftOpenOverlay>
                                   angle: rot,
                                   child: Transform.scale(
                                     scale: scale,
-                                    child: SizedBox(
-                                      width: boxSize,
-                                      height: boxSize,
-                                      child: CustomPaint(
-                                        painter: GiftBoxPainter(
-                                          open: open,
-                                          lidOpacity: lidOpacity,
+                                    child: GestureDetector(
+                                      behavior: HitTestBehavior.opaque,
+                                      onTap: _onBoxTap,
+                                      child: SizedBox(
+                                        width: boxSize,
+                                        height: boxSize,
+                                        child: CustomPaint(
+                                          painter: GiftBoxPainter(
+                                            open: open,
+                                            lidOpacity: lidOpacity,
+                                          ),
                                         ),
                                       ),
                                     ),
                                   ),
                                 ),
                               ),
+                              if (!_tapped)
+                                Positioned(
+                                  bottom: 4,
+                                  left: 0,
+                                  right: 0,
+                                  child: Opacity(
+                                    opacity:
+                                        (drop * (0.6 + 0.4 * sin(loop * 2 * pi * 2)))
+                                            .clamp(0.0, 1.0),
+                                    child: const Center(
+                                      child: Text(
+                                        'TAP THE GIFT TO OPEN',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w900,
+                                          letterSpacing: 1.2,
+                                          color: _gInkSoft,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
                             ],
                           ),
                         ),
@@ -907,7 +1051,7 @@ class _GiftOpenOverlayState extends State<_GiftOpenOverlay>
                                 offset: Offset(0, 20 * (1 - btnT)),
                                 child: IgnorePointer(
                                   ignoring: btnT < 0.6,
-                                  child: _CollectButton(onTap: widget.onDone),
+                                  child: _CollectButton(onTap: _collect),
                                 ),
                               ),
                             ),
@@ -928,6 +1072,7 @@ class _GiftOpenOverlayState extends State<_GiftOpenOverlay>
   /// The rewards pop in one after another inside the card.
   List<Widget> _buildItems() {
     final List<Widget> items = <Widget>[];
+    final int firstCoin = widget.rewards.indexWhere((r) => r.isCoins);
     for (int i = 0; i < widget.rewards.length; i++) {
       if (i > 0) {
         items.add(
@@ -950,6 +1095,7 @@ class _GiftOpenOverlayState extends State<_GiftOpenOverlay>
             scale: Curves.elasticOut.transform(p).clamp(0.0, 1.4),
             child: _RewardCard(
               reward: widget.rewards[i],
+              iconKey: i == firstCoin ? _coinIconKey : null,
               bob: sin(_loop.value * 2 * pi + i * 1.3) * 3,
             ),
           ),
@@ -1101,8 +1247,9 @@ class _GiftBurstPainter extends CustomPainter {
 class _RewardCard extends StatelessWidget {
   final GiftReward reward;
   final double bob;
+  final Key? iconKey;
 
-  const _RewardCard({required this.reward, required this.bob});
+  const _RewardCard({required this.reward, required this.bob, this.iconKey});
 
   @override
   Widget build(BuildContext context) {
@@ -1115,6 +1262,7 @@ class _RewardCard extends StatelessWidget {
           Transform.translate(
             offset: Offset(0, bob),
             child: Container(
+              key: iconKey,
               width: 62,
               height: 62,
               alignment: Alignment.center,
@@ -1285,7 +1433,6 @@ class _CollectButtonState extends State<_CollectButton> {
       onTapUp: (_) => setState(() => _down = false),
       onTapCancel: () => setState(() => _down = false),
       onTap: () {
-        SoundService.instance.click();
         widget.onTap();
       },
       child: AnimatedScale(
