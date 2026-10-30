@@ -78,7 +78,6 @@ class _LevelCompleteOverlayState extends State<_LevelCompleteOverlay>
 
   @override
   Widget build(BuildContext context) {
-    const Color plum = Color(0xFF6B3A55);
 
     return Stack(
       children: [
@@ -203,14 +202,10 @@ class _LevelCompleteOverlayState extends State<_LevelCompleteOverlay>
 
                                     if (widget.completedWords.isNotEmpty) ...[
                                       const SizedBox(height: 18),
-                                      Text(
-                                        'WORDS FOUND',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w900,
-                                          letterSpacing: 1.4,
-                                          color: plum.withValues(alpha: 0.65),
-                                        ),
+                                      const BloomAnimatedLabel(
+                                        'Words Found',
+                                        size: 18,
+                                        textAlign: TextAlign.center,
                                       ),
                                       const SizedBox(height: 10),
                                       Wrap(
@@ -515,15 +510,7 @@ class _WinWordChipState extends State<_WinWordChip>
               ),
             ),
             const SizedBox(width: 8),
-            Text(
-              widget.word,
-              style: const TextStyle(
-                fontSize: 19,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 1.2,
-                color: Color(0xFF3B2A33),
-              ),
-            ),
+            BloomAnimatedLabel(widget.word, size: 19),
           ],
         ),
       ),

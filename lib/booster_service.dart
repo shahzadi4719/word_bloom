@@ -34,7 +34,7 @@ class BoosterDef {
 const List<BoosterDef> kBoosters = [
   BoosterDef(
     id: BoosterId.bloomSwap,
-    name: 'Bloom Swap',
+    name: 'Super Swap',
     description: 'Swap the current and next bubble.',
     unlockLevel: 1,
     startQuantity: 3,
@@ -65,8 +65,7 @@ const List<BoosterDef> kBoosters = [
   ),
 ];
 
-BoosterDef boosterDef(BoosterId id) =>
-    kBoosters.firstWhere((b) => b.id == id);
+BoosterDef boosterDef(BoosterId id) => kBoosters.firstWhere((b) => b.id == id);
 
 // ================================================================
 // REWARDS
@@ -149,20 +148,31 @@ class BoosterGrant {
 // SERVICE  (inventory + unlock state, saved with SharedPreferences)
 // ================================================================
 
+int boosterCoinPrice(BoosterId id) => switch (id) {
+  BoosterId.bloomSwap => 100,
+  BoosterId.bloomBomb => 250,
+  BoosterId.rainbowBloom => 350,
+  BoosterId.bloomLightning => 450,
+  BoosterId.flowerBlast => 600,
+};
+
 class BoosterService extends ChangeNotifier {
   BoosterService._();
   static final BoosterService instance = BoosterService._();
 
   final Map<BoosterId, int> _qty = {};
   final Set<int> _claimed = {};
+  final Set<BoosterId> _purchased = {};
   int _unlockedLevel = 1;
   bool _loaded = false;
+  Future<void>? _loading;
 
   bool get loaded => _loaded;
   int get unlockedLevel => _unlockedLevel;
 
   int quantity(BoosterId id) => _qty[id] ?? 0;
-  bool isUnlocked(BoosterDef b) => _unlockedLevel >= b.unlockLevel;
+  bool isUnlocked(BoosterDef b) =>
+      _unlockedLevel >= b.unlockLevel || _purchased.contains(b.id);
   bool canUse(BoosterDef b) => isUnlocked(b) && quantity(b.id) > 0;
 
   /// Re-reads the unlocked level from ProgressService (single source of
@@ -175,7 +185,14 @@ class BoosterService extends ChangeNotifier {
     }
   }
 
-  Future<void> load() async {
+  Future<void> load() {
+    if (_loaded) return _syncUnlockedLevel();
+    final pending = _loading;
+    if (pending != null) return pending;
+    return _loading = _loadInventory().whenComplete(() => _loading = null);
+  }
+
+  Future<void> _loadInventory() async {
     if (_loaded) {
       await _syncUnlockedLevel();
       return;
@@ -185,8 +202,9 @@ class BoosterService extends ChangeNotifier {
     final bool first = !(p.getBool('booster_init') ?? false);
     for (final BoosterDef b in kBoosters) {
       _qty[b.id] =
-          p.getInt('booster_qty_${b.id.name}') ??
-          (first ? b.startQuantity : 0);
+          p.getInt('booster_qty_${b.id.name}') ?? (first ? b.startQuantity : 0);
+      if (p.getBool('booster_purchased_${b.id.name}') ?? false)
+        _purchased.add(b.id);
     }
 
     _claimed
@@ -227,6 +245,28 @@ class BoosterService extends ChangeNotifier {
     notifyListeners();
     final SharedPreferences p = await SharedPreferences.getInstance();
     await p.setInt('booster_qty_${id.name}', quantity(id));
+  }
+
+  /// Purchased boosters remain unlocked, including after their quantity reaches zero.
+  Future<void> addPurchased(BoosterId id) async {
+    final p = await SharedPreferences.getInstance();
+    final before = quantity(id);
+    final wasPurchased = _purchased.contains(id);
+    try {
+      if (!await p.setInt('booster_qty_${id.name}', before + 1)) {
+        throw StateError('Could not save booster');
+      }
+      if (!await p.setBool('booster_purchased_${id.name}', true)) {
+        throw StateError('Could not save unlock');
+      }
+    } catch (_) {
+      await p.setInt('booster_qty_${id.name}', before);
+      await p.setBool('booster_purchased_${id.name}', wasPurchased);
+      rethrow;
+    }
+    _qty[id] = before + 1;
+    _purchased.add(id);
+    notifyListeners();
   }
 
   /// Uses one booster. The UI updates immediately; saving happens after.

@@ -1,9 +1,9 @@
 import 'dart:math';
+
 import 'package:flutter/material.dart';
 
-
 import '../sound_service.dart';
-import 'level_select_screen.dart';
+import 'game_mode_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -64,7 +64,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 SoundService.instance.click();
                 Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (context) => const LevelSelectScreen(),
+                    builder: (context) => const GameModeScreen(),
                   ),
                 );
               },
@@ -149,9 +149,8 @@ class _StartButtonState extends State<_StartButton>
                 border: Border.all(color: Colors.white, width: 3),
                 boxShadow: [
                   BoxShadow(
-                    color: const Color(
-                      0xFFC90E7E,
-                    ).withValues(alpha: _pressed ? 0.30 : glow),
+                    color: const Color(0xFFC90E7E)
+                        .withValues(alpha: _pressed ? 0.30 : glow),
                     blurRadius: _pressed
                         ? 10
                         : 22 + (_pulseController.value * 8),
@@ -170,21 +169,21 @@ class _StartButtonState extends State<_StartButton>
             const SizedBox(width: 12),
             Text(
               'START BLOOMING',
-              
-style: const TextStyle(
-  fontFamily: 'Fredoka',
-  color: Colors.white,
-  fontWeight: FontWeight.w700,
-  fontSize: 19,
-  letterSpacing: 1.0,
-  shadows: [
-    Shadow(
-      color: Color(0x4D000000),
-      blurRadius: 3,
-      offset: Offset(0, 1.5),
-    ),
-  ],
-),
+
+              style: const TextStyle(
+                fontFamily: 'Fredoka',
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+                fontSize: 19,
+                letterSpacing: 1.0,
+                shadows: [
+                  Shadow(
+                    color: Color(0x4D000000),
+                    blurRadius: 3,
+                    offset: Offset(0, 1.5),
+                  ),
+                ],
+              ),
             ),
 
             const SizedBox(width: 12),

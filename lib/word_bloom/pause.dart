@@ -141,8 +141,6 @@ class _PauseDialogState extends State<_PauseDialog>
   }
 
   Widget _card(double l) {
-    const Color plum = Color(0xFF6B3A55);
-
     return Stack(
       clipBehavior: Clip.none,
       alignment: Alignment.topCenter,
@@ -171,14 +169,7 @@ class _PauseDialogState extends State<_PauseDialog>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text(
-                'Paused',
-                style: TextStyle(
-                  fontSize: 30,
-                  fontWeight: FontWeight.w900,
-                  color: plum,
-                ),
-              ),
+              const BloomDialogTitle('Paused', size: 30),
               const SizedBox(height: 18),
               _PauseToggleRow(
                 icon: Icons.music_note_rounded,
@@ -218,72 +209,14 @@ class _PauseDialogState extends State<_PauseDialog>
                 onTap: widget.onResume,
               ),
               const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: _PauseButton3D(
-                      label: 'RETRY',
-                      icon: Icons.refresh_rounded,
-                      textColor: const Color(0xFFE0287F),
-                      height: 48,
-                      onTap: widget.onRetry,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _PauseButton3D(
-                      label: 'EXIT',
-                      icon: Icons.logout_rounded,
-                      textColor: plum,
-                      height: 48,
-                      onTap: widget.onExit,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'Word Bloom  •  Score ${widget.score}',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.4,
-                  color: plum.withValues(alpha: 0.65),
-                ),
+              _PauseButton3D(
+                label: 'RETRY',
+                icon: Icons.refresh_rounded,
+                textColor: const Color(0xFFE0287F),
+                height: 48,
+                onTap: widget.onRetry,
               ),
             ],
-          ),
-        ),
-
-        // SPARKLES
-        Positioned(
-          top: 78,
-          left: 24,
-          child: Icon(
-            Icons.auto_awesome,
-            size: 20,
-            color: Colors.white.withValues(alpha: 0.55 + 0.45 * l),
-          ),
-        ),
-        Positioned(
-          top: 90,
-          right: 78,
-          child: Icon(
-            Icons.auto_awesome,
-            size: 14,
-            color: const Color(0xFFFF9BC4).withValues(alpha: 1 - 0.55 * l),
-          ),
-        ),
-        Positioned(
-          top: 124,
-          left: 44,
-          child: Container(
-            width: 7,
-            height: 7,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: const Color(0xFFFF9BC4).withValues(alpha: 0.5 + 0.4 * l),
-            ),
           ),
         ),
 
@@ -291,25 +224,7 @@ class _PauseDialogState extends State<_PauseDialog>
         Positioned(
           top: 64,
           right: 14,
-          child: GestureDetector(
-            onTap: widget.onResume,
-            child: Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.white,
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFFFF4D96).withValues(alpha: 0.22),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: const Icon(Icons.close_rounded, size: 22, color: plum),
-            ),
-          ),
+          child: BloomCloseButton(onTap: widget.onResume),
         ),
 
         // BADGE (breathes gently)
@@ -434,25 +349,22 @@ class _PauseToggleRow extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  label,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w900,
-                    color: Color(0xFF6B3A55),
+                BloomAnimatedLabel(label, size: 20),
+                const SizedBox(height: 3),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 220),
+                  child: Text(
+                    value ? 'On' : 'Off',
+                    key: ValueKey(value),
+                    style: TextStyle(
+                      fontFamily: 'Fredoka',
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: value
+                          ? const Color(0xFFC3458D)
+                          : const Color(0xFF9C8A95),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 2),
-                AnimatedDefaultTextStyle(
-                  duration: const Duration(milliseconds: 180),
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w900,
-                    color: value
-                        ? const Color(0xFFE0287F)
-                        : const Color(0xFF9C8A95),
-                  ),
-                  child: Text(value ? 'On' : 'Off'),
                 ),
               ],
             ),
@@ -590,6 +502,7 @@ class _PauseButton3DState extends State<_PauseButton3D> {
             Text(
               widget.label,
               style: TextStyle(
+                fontFamily: 'Fredoka',
                 color: widget.textColor,
                 fontSize: p ? 21 : 15,
                 fontWeight: FontWeight.w900,

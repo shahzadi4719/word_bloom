@@ -1,8 +1,10 @@
 import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import 'bubble.dart';
 import 'levels.dart';
+import 'game_mode.dart';
 
 /// Special shots from the booster bar.
 enum ShotSpecial { none, bomb, rainbow, lightning, flower }
@@ -31,6 +33,7 @@ class BoosterEffect {
 class FlyingPopBubble {
   final String letter;
   final Color color;
+  final int starSlot;
   final double startX;
   final double startY;
   double progress; // 0 -> 1
@@ -38,6 +41,7 @@ class FlyingPopBubble {
   FlyingPopBubble({
     required this.letter,
     required this.color,
+    this.starSlot = 0,
     required this.startX,
     required this.startY,
     this.progress = 0,
@@ -68,6 +72,20 @@ class BonusShotBubble {
 }
 
 class GameEngine {
+  final GameMode mode;
+  GameEngine({this.mode = GameMode.wordBloom});
+  int _initialBoardCount = 0;
+  int matchesMade = 0;
+  bool get isWordMode => mode.isWordMode;
+  double get goalProgress => isWordMode
+      ? completedWords.length / max(1, currentLevel?.words.length ?? 1)
+      : (_initialBoardCount == 0
+            ? 0.0
+            : (1 - bubbles.length / _initialBoardCount)
+                  .clamp(0.0, 1.0)
+                  .toDouble());
+  Color colorForToken(String token) => _colorForLetter(token);
+
   // ============================================================
   // DICTIONARY (any real word pops, but only within the level's
   // allowed length range - see lengthRangeFor in levels.dart)
@@ -87,10 +105,7 @@ class GameEngine {
 
   /// Builds the prefix table in small slices so the game never freezes
   /// while the (big) dictionary is being indexed.
-  Future<void> _buildPrefixes(
-    Iterator<String> it,
-    Set<String> target,
-  ) async {
+  Future<void> _buildPrefixes(Iterator<String> it, Set<String> target) async {
     int n = 0;
     while (it.moveNext()) {
       final String w = it.current;
@@ -131,6 +146,26 @@ class GameEngine {
   double wordMessageTimer = 0;
 
   final List<FlyingPopBubble> flyingPops = [];
+  final Set<int> starBubbleIds = {};
+  final List<FlyingPopBubble> flyingStars = [];
+  int collectedStars = 0;
+  Size _screenSize = const Size(360, 700);
+  int _visibleBoardRows = 5;
+
+  void _collectStar(Bubble b) {
+    if (mode != GameMode.colorMatch || !starBubbleIds.remove(b.id)) return;
+    flyingStars.add(
+      FlyingPopBubble(
+        letter: '*',
+        color: const Color(0xFFFFC74C),
+        startX: b.x,
+        startY: b.y,
+        starSlot: collectedStars,
+      ),
+    );
+    collectedStars = min(3, collectedStars + 1);
+  }
+
   final List<String> collectedLetters = [];
 
   // ---- boosters ----
@@ -206,7 +241,9 @@ class GameEngine {
   /// All of the level's words have been found (board is clearing).
   bool get goalReached =>
       currentLevel != null &&
-      completedWords.length >= currentLevel!.words.length;
+      (isWordMode
+          ? completedWords.length >= currentLevel!.words.length
+          : _initialBoardCount > 0 && bubbles.isEmpty);
 
   /// Frames each falling bubble still waits before it starts to drop
   /// (used for the cascade when a level is won).
@@ -294,7 +331,7 @@ class GameEngine {
   double horizontalSpacing = 0.104;
 
   /// Used by the UI aim clamp and as the reference for the first row.
-  final double boardTopY = 0.115; // top row hangs right under the top bar
+  double boardTopY = 0.115; // top row hangs right under the top bar
 
   /// Center y of the first row (must match _addRow).
   double get _topRowY => boardTopY + 0.03;
@@ -307,6 +344,7 @@ class GameEngine {
 
   /// Fraction of the screen height covered by the top bar area.
   static const double headerY = 0.125;
+  static const double headerHeightPx = 84;
 
   double _aspect = 0.5;
 
@@ -316,12 +354,16 @@ class GameEngine {
   void configureForScreen(Size size) {
     if (size.width <= 0 || size.height <= 0) return;
 
+    _screenSize = size;
     _aspect = size.width / size.height;
 
     final double maxFitDiameter = size.width * 0.90 / maxBoardColumns;
-    final double diameterPx = min(shooterBubbleDiameterPx, maxFitDiameter);
+    final double diameterPx =
+        min(shooterBubbleDiameterPx, maxFitDiameter) * .96;
     bubbleRadius = (diameterPx / 2) / size.width;
     horizontalSpacing = bubbleRadius * 2;
+    // Keep the complete first bubble below the word-goal strip on every screen.
+    boardTopY = (headerHeightPx + diameterPx / 2 + 4) / size.height - 0.03;
   }
 
   double _physicalDistance(double dx, double dyHeightFraction) {
@@ -382,7 +424,13 @@ class GameEngine {
   }
 
   void startLevel(int levelNumber) {
-    currentLevel = getLevel(levelNumber);
+    currentLevel = getLevel(levelNumber, mode: mode);
+    configureForScreen(_screenSize);
+    starBubbleIds.clear();
+    flyingStars.clear();
+    collectedStars = 0;
+    matchesMade = 0;
+    _initialBoardCount = 0;
     _configureDifficulty(levelNumber);
 
     bubbles.clear();
@@ -426,10 +474,22 @@ class GameEngine {
     bonusShotsLeft = 0;
     bonusShots.clear();
 
-    if (levelNumber == 1) {
+    if (levelNumber == 1 && isWordMode) {
       _createLevelOne();
     } else {
       _createPatternLevel(currentLevel!);
+    }
+    _initialBoardCount = bubbles.length;
+    if (mode == GameMode.colorMatch) {
+      final candidates = bubbles.where((b) => !_blocked(b)).toList()
+        ..sort((a, b) => a.y.compareTo(b.y));
+      for (int i = 0; i < min(3, candidates.length); i++) {
+        final index = ((candidates.length - 1) * i / 2).round();
+        starBubbleIds.add(candidates[index].id);
+      }
+    }
+    if (!isWordMode) {
+      _shotQueue = _generateShotQueue(max(30, currentLevel!.maxShots * 2));
     }
   }
 
@@ -568,13 +628,7 @@ class GameEngine {
       '.#..#.',
     ],
     // Wings
-    [
-      '#....#',
-      '##..##',
-      '##..##',
-      '##..##',
-      '.#..#.',
-    ],
+    ['#....#', '##..##', '##..##', '##..##', '.#..#.'],
     // Chevron
     [
       '######',
@@ -593,17 +647,24 @@ class GameEngine {
 
   void _createPatternLevel(GameLevel level) {
     final List<String> source = List<String>.from(level.letters)
-      ..shuffle(Random());
+      ..shuffle(isWordMode ? Random() : Random(level.number * 31 + mode.index));
 
     if (source.isEmpty) return;
 
-    final List<String> pattern =
-        _patterns[(level.number * 5 + 1) % _patterns.length];
-
-    // Tall pattern: push the top rows above the screen so only the
-    // bottom [visibleRows] rows are showing.
-    final int hiddenRows = max(0, pattern.length - visibleRows);
-    _scrollOffset = -hiddenRows * verticalSpacing;
+    final sourcePattern = _patterns[(level.number * 5 + 1) % _patterns.length];
+    final diameter = bubbleRadius * 2 * _screenSize.width;
+    final rowHeight = diameter * .87;
+    final available = _screenSize.height * .64 - headerHeightPx - 8;
+    final rowsThatFit = max(
+      2,
+      ((available - diameter) / rowHeight).floor() + 1,
+    );
+    // Keep the entire level above the play area, at the original bubble size.
+    // The boundary row peeks below the header to show that more rows remain.
+    final pattern = sourcePattern;
+    _visibleBoardRows = rowsThatFit;
+    final hiddenRows = max(0, pattern.length - rowsThatFit);
+    _scrollOffset = hiddenRows > 0 ? -(hiddenRows + .55) * verticalSpacing : 0;
 
     int index = 0;
 
@@ -858,6 +919,18 @@ class GameEngine {
   }
 
   Color _colorForLetter(String letter) {
+    if (!isWordMode) {
+      const palette = [
+        Color(0xFFFF6FAE),
+        Color(0xFF8D7CFF),
+        Color(0xFF4FC3F7),
+        Color(0xFFFFB84D),
+        Color(0xFF66D9A0),
+        Color(0xFFFF8A80),
+      ];
+      final index = 'ABCDEF'.indexOf(letter.toUpperCase());
+      if (index >= 0) return palette[index];
+    }
     return letterColors[letter.toUpperCase()] ?? const Color(0xFF7E8CFF);
   }
 
@@ -877,7 +950,9 @@ class GameEngine {
   ];
 
   List<String> _generateShotQueue(int minLength) {
-    final String pool = _pools[_poolTier.clamp(0, _pools.length - 1)];
+    final String pool = isWordMode
+        ? _pools[_poolTier.clamp(0, _pools.length - 1)]
+        : _activeMatchSymbols().join();
     final Random rnd = Random();
     return List.generate(
       max(minLength, 30),
@@ -900,6 +975,7 @@ class GameEngine {
 
     _ensureShotQueueHas(_shotQueueIndex);
 
+    if (!isWordMode) _refreshQueuedSymbol(_shotQueueIndex);
     final String letter = _shotQueue[_shotQueueIndex];
     _shotQueueIndex++;
     return letter;
@@ -909,17 +985,24 @@ class GameEngine {
 
   String getLetterAfterNextPreview() => _previewAt(1);
 
+  String getThirdLetterPreview() => _previewAt(2);
+
   String _previewAt(int lookahead) {
     if (currentLevel == null) return 'C';
 
     final int index = _shotQueueIndex + lookahead;
     _ensureShotQueueHas(index);
+    if (!isWordMode) _refreshQueuedSymbol(index);
     return _shotQueue[index];
   }
 
   /// Swaps the ball about to be fired with the one right after it.
   /// [ignoreLimit] is used by the Bloom Swap booster (no level swap limit).
-  bool swapNextTwo({bool ignoreLimit = false}) {
+  bool swapNextTwo({bool ignoreLimit = false}) =>
+      swapWithPreview(1, ignoreLimit: ignoreLimit);
+
+  bool swapWithPreview(int lookahead, {bool ignoreLimit = false}) {
+    if (lookahead < 1 || lookahead > 2) return false;
     if (shooting ||
         levelComplete ||
         gameOver ||
@@ -929,11 +1012,11 @@ class GameEngine {
     }
     if (!ignoreLimit && swapsLeft == 0) return false;
 
-    _ensureShotQueueHas(_shotQueueIndex + 1);
+    _ensureShotQueueHas(_shotQueueIndex + lookahead);
 
     final String temp = _shotQueue[_shotQueueIndex];
-    _shotQueue[_shotQueueIndex] = _shotQueue[_shotQueueIndex + 1];
-    _shotQueue[_shotQueueIndex + 1] = temp;
+    _shotQueue[_shotQueueIndex] = _shotQueue[_shotQueueIndex + lookahead];
+    _shotQueue[_shotQueueIndex + lookahead] = temp;
 
     if (!ignoreLimit && swapsLeft > 0) swapsLeft--;
     return true;
@@ -1302,6 +1385,10 @@ class GameEngine {
   // ============================================================
 
   void _checkForWords(Bubble shot) {
+    if (!isWordMode) {
+      _checkForMatch(shot);
+      return;
+    }
     if (currentLevel == null || _dictionary.isEmpty) {
       _checkGameOver();
       return;
@@ -1404,6 +1491,74 @@ class GameEngine {
     return neighbors;
   }
 
+  List<String> _activeMatchSymbols() {
+    final present = bubbles
+        .where((b) => !stoneIds.contains(b.id) && !wildIds.contains(b.id))
+        .map((b) => b.letter)
+        .toSet();
+    final pool = matchSymbolsFor(currentLevel?.number ?? 1);
+    final active = pool.where(present.contains).toList();
+    return active.isEmpty ? pool : active;
+  }
+
+  void _refreshQueuedSymbol(int index) {
+    final active = _activeMatchSymbols();
+    if (!active.contains(_shotQueue[index])) {
+      _shotQueue[index] = active[_bonusRnd.nextInt(active.length)];
+    }
+  }
+
+  /// Flood-fill against ONE target at a time. A wildcard must never
+  /// bridge unrelated colors/letters into a single match.
+  void _checkForMatch(Bubble shot) {
+    List<Bubble> best = [];
+    final targets = wildIds.contains(shot.id)
+        ? bubbles.where((b) => !_blocked(b) && !wildIds.contains(b.id)).toList()
+        : [shot];
+    for (final target in targets) {
+      final seen = <int>{};
+      final group = <Bubble>[];
+      final pending = <Bubble>[shot];
+      while (pending.isNotEmpty) {
+        final b = pending.removeLast();
+        if (!seen.add(b.id) || _blocked(b) || !_isOnScreen(b)) continue;
+        final same = mode == GameMode.colorMatch
+            ? b.color == target.color
+            : b.letter.toUpperCase() == target.letter.toUpperCase();
+        if (!same && !wildIds.contains(b.id)) continue;
+        group.add(b);
+        pending.addAll(_getNeighbors(b));
+      }
+      if (group.length > best.length) best = group;
+    }
+    if (best.length >= 3) {
+      matchesMade++;
+      score += best.length * 50;
+      for (final b in best) {
+        _burst(b, b.color, b.letter);
+        bubbles.remove(b);
+      }
+      // Retain bomb metadata until its neighbours have been resolved.
+      _explodeBombs(best);
+      _breakStonesNextTo(best);
+      for (final b in best) {
+        _forgetBubble(b.id);
+      }
+      _dropFloatingBubbles();
+      _requestScroll();
+    }
+    _finishMatchTurn();
+  }
+
+  void _finishMatchTurn() {
+    if (isWordMode) return;
+    if (goalReached && !_winPending && !levelComplete) {
+      _cascadeBoard();
+    } else {
+      _checkGameOver();
+    }
+  }
+
   // ============================================================
   // POP WORD
   // ============================================================
@@ -1416,6 +1571,7 @@ class GameEngine {
 
     for (int mi = 0; mi < matched.length; mi++) {
       final Bubble bubble = matched[mi];
+      _collectStar(bubble);
       flyingPops.add(
         FlyingPopBubble(
           letter: word[mi],
@@ -1438,6 +1594,10 @@ class GameEngine {
   }
 
   void _updatePopAnimation() {
+    for (final star in List<FlyingPopBubble>.from(flyingStars)) {
+      star.progress += .022;
+      if (star.progress >= 1) flyingStars.remove(star);
+    }
     if (flyingPops.isEmpty) return;
 
     for (final FlyingPopBubble fp in List<FlyingPopBubble>.from(flyingPops)) {
@@ -1453,6 +1613,7 @@ class GameEngine {
   // ============================================================
 
   void _burst(Bubble b, Color color, String letter) {
+    _collectStar(b);
     flyingPops.add(
       FlyingPopBubble(
         letter: letter.isEmpty ? 'X' : letter,
@@ -1579,6 +1740,7 @@ class GameEngine {
         .toList();
 
     for (final Bubble b in floating) {
+      _collectStar(b);
       bubbles.removeWhere((x) => x.id == b.id);
       fallingBubbles.add(b);
       _fallSpeeds[b.id] = 0.004;
@@ -1596,6 +1758,7 @@ class GameEngine {
 
     int rank = 0;
     for (final Bubble b in rest) {
+      _collectStar(b);
       bubbles.removeWhere((x) => x.id == b.id);
       fallingBubbles.add(b);
       _fallSpeeds[b.id] = -0.010; // a little hop up, then it falls
@@ -1697,8 +1860,10 @@ class GameEngine {
   // SCROLL - upper rows slide down when the bottom gets cleared
   // ============================================================
 
-  /// Hidden rows above the screen can't be used for words yet.
-  bool _isOnScreen(Bubble b) => b.y >= _ceilingY - 0.01;
+  /// Use the same visible edge as the board painter: even a tiny visible
+  /// portion can join a match. Entirely covered bubbles wait until revealed.
+  bool _isOnScreen(Bubble b) =>
+      b.y * _screenSize.height + b.radius * _screenSize.width > 0;
 
   void _requestScroll() {
     if (bubbles.isEmpty || _scrollOffset >= -0.001) return;
@@ -1709,7 +1874,8 @@ class GameEngine {
     }
 
     // Keep the lowest bubble at the bottom visible row.
-    final double targetBottom = _topRowY + verticalSpacing * (visibleRows - 1);
+    final double targetBottom =
+        _topRowY + verticalSpacing * (_visibleBoardRows - 1);
 
     // Never slide further than needed to reveal every hidden row.
     final double shift = min(targetBottom - lowest, -_scrollOffset);
@@ -1768,7 +1934,7 @@ class GameEngine {
     if (currentLevel == null) return;
 
     // Level already completed - no Game Over.
-    if (completedWords.length >= currentLevel!.words.length) return;
+    if (goalReached || _winPending) return;
 
     // Any bubble in the danger zone near the launcher ends the game.
     const double dangerY = 0.78;
@@ -1786,20 +1952,18 @@ class GameEngine {
     }
   }
 
-  /// 1-3 stars based on how efficiently the level was cleared.
+  /// Up to three collectible stars, locked before the win bonus sequence.
   int get starsEarned => _lockedStars ?? _computeStars();
 
   int _computeStars() {
-    final GameLevel? level = currentLevel;
+    if (mode == GameMode.colorMatch) return collectedStars.clamp(1, 3);
+    final level = currentLevel;
     if (level == null || level.maxShots == 0) return 3;
-
-    final int required = level.totalRequiredLetters;
-    final int slack = max(1, level.maxShots - required);
-    final int shotsLeft = max(0, level.maxShots - shotsUsed);
-    final double ratio = shotsLeft / slack;
-
-    if (ratio >= 0.5) return 3;
-    if (ratio >= 0.2) return 2;
+    final required = isWordMode ? level.totalRequiredLetters : 0;
+    final slack = max(1, level.maxShots - required);
+    final ratio = max(0, level.maxShots - shotsUsed) / slack;
+    if (ratio >= .5) return 3;
+    if (ratio >= .2) return 2;
     return 1;
   }
 
@@ -1892,10 +2056,9 @@ class GameEngine {
     final Offset ab = b - a;
     final double len2 = ab.dx * ab.dx + ab.dy * ab.dy;
     if (len2 < 1e-12) return (p - a).distance;
-    final double t =
-        (((p.dx - a.dx) * ab.dx + (p.dy - a.dy) * ab.dy) / len2)
-            .clamp(0.0, 1.0)
-            .toDouble();
+    final double t = (((p.dx - a.dx) * ab.dx + (p.dy - a.dy) * ab.dy) / len2)
+        .clamp(0.0, 1.0)
+        .toDouble();
     return (p - (a + ab * t)).distance;
   }
 
@@ -1911,6 +2074,7 @@ class GameEngine {
     }
     _dropFloatingBubbles();
     _requestScroll();
+    _finishMatchTurn();
   }
 
   void _updateBoosterEffects() {

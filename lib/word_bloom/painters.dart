@@ -6,8 +6,13 @@ part of '../word_bloom.dart';
 class _BonusShotPainter extends CustomPainter {
   final List<BonusShotBubble> shots;
   final double radiusFrac;
+  final bool showLetters;
 
-  const _BonusShotPainter({required this.shots, required this.radiusFrac});
+  const _BonusShotPainter({
+    required this.shots,
+    required this.radiusFrac,
+    this.showLetters = true,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -69,16 +74,8 @@ class _BonusShotPainter extends CustomPainter {
         final double left = pos.dx - totalW / 2;
         final double cy = pos.dy - t * r * 1.4;
 
-        CoinIcon.paint(
-          canvas,
-          Offset(left + coinR, cy),
-          coinR,
-          alpha: fade,
-        );
-        tp.paint(
-          canvas,
-          Offset(left + coinR * 2 + gap, cy - tp.height / 2),
-        );
+        CoinIcon.paint(canvas, Offset(left + coinR, cy), coinR, alpha: fade);
+        tp.paint(canvas, Offset(left + coinR * 2 + gap, cy - tp.height / 2));
       }
     }
   }
@@ -97,25 +94,11 @@ class _BonusShotPainter extends CustomPainter {
         ).createShader(Rect.fromCircle(center: c, radius: radius * 1.3)),
     );
 
-    canvas.drawCircle(
-      c,
-      radius,
-      Paint()
-        ..shader = RadialGradient(
-          center: const Alignment(-0.35, -0.45),
-          radius: 0.9,
-          colors: [
-            Colors.white.withValues(alpha: 0.48),
-            s.color,
-            s.color.withValues(alpha: 0.78),
-          ],
-          stops: const [0.0, 0.30, 1.0],
-        ).createShader(Rect.fromCircle(center: c, radius: radius)),
-    );
+    paintBloomBubble(canvas, c, radius, s.color);
 
     final TextPainter tp = TextPainter(
       text: TextSpan(
-        text: s.letter,
+        text: showLetters ? s.letter : '',
         style: TextStyle(
           color: Colors.white,
           fontSize: radius * 0.92,
@@ -405,34 +388,7 @@ class _GlossyBubblePainter extends CustomPainter {
     final double radius = min(size.width, size.height) / 2;
     final Offset center = Offset(size.width / 2, size.height / 2);
 
-    final Paint shadowPaint = Paint()
-      ..color = Colors.black.withValues(alpha: 0.15)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
-    canvas.drawCircle(center.translate(0, 3), radius * 0.90, shadowPaint);
-
-    final Paint bubblePaint = Paint()
-      ..shader = RadialGradient(
-        center: const Alignment(-0.35, -0.45),
-        radius: 0.9,
-        colors: [
-          Colors.white.withValues(alpha: 0.48),
-          color,
-          color.withValues(alpha: 0.82),
-        ],
-        stops: const [0.0, 0.28, 1.0],
-      ).createShader(Rect.fromCircle(center: center, radius: radius));
-    canvas.drawCircle(center, radius * 0.90, bubblePaint);
-
-    final Paint shine = Paint()..color = Colors.white.withValues(alpha: 0.60);
-    canvas.drawOval(
-      Rect.fromLTWH(
-        size.width * 0.23,
-        size.height * 0.15,
-        size.width * 0.27,
-        size.height * 0.16,
-      ),
-      shine,
-    );
+    paintBloomBubble(canvas, center, radius * .90, color);
   }
 
   @override
@@ -445,6 +401,7 @@ class _GlossyBubblePainter extends CustomPainter {
 // ================================================================
 
 class _GameBoardPainter extends CustomPainter {
+  final bool showLetters;
   final List<Bubble> bubbles;
   final Bubble? flyingBubble;
   final ShotSpecial flyingSpecial;
@@ -453,11 +410,13 @@ class _GameBoardPainter extends CustomPainter {
   final Set<int> iceIds;
   final Set<int> hiddenIds;
   final Set<int> bombIds;
+  final Set<int> starIds;
   final Set<int> wildIds;
   final double entranceProgress;
   final double flyingPulse;
 
   const _GameBoardPainter({
+    this.showLetters = true,
     required this.bubbles,
     required this.flyingBubble,
     this.flyingSpecial = ShotSpecial.none,
@@ -467,6 +426,7 @@ class _GameBoardPainter extends CustomPainter {
     this.hiddenIds = const {},
     this.bombIds = const {},
     this.wildIds = const {},
+    this.starIds = const {},
     this.entranceProgress = 1.0,
     this.flyingPulse = 0.0,
   });
@@ -578,26 +538,12 @@ class _GameBoardPainter extends CustomPainter {
           ? const Color(0xFF6D6A94)
           : bubble.color;
 
-      final Paint paint = Paint()
-        ..shader = RadialGradient(
-          center: const Alignment(-0.35, -0.45),
-          radius: 0.9,
-          colors: [
-            Colors.white.withValues(alpha: 0.48),
-            bodyColor,
-            bodyColor.withValues(alpha: 0.78),
-          ],
-          stops: const [0.0, 0.30, 1.0],
-        ).createShader(Rect.fromCircle(center: center, radius: radius));
-      canvas.drawCircle(center, radius, paint);
-
-      canvas.drawOval(
-        Rect.fromCenter(
-          center: center.translate(-radius * 0.25, -radius * 0.38),
-          width: radius * 0.48,
-          height: radius * 0.28,
-        ),
-        Paint()..color = Colors.white.withValues(alpha: 0.58),
+      paintBloomBubble(
+        canvas,
+        center,
+        radius,
+        bodyColor,
+        shimmer: boostSize ? .5 + .5 * pulse : 0,
       );
 
       // Letter (layout() is required before measuring/painting).
@@ -841,10 +787,9 @@ class _GameBoardPainter extends CustomPainter {
       }
     }
 
-    // The board hangs from under the top bar: everything above the bar's
-    // bottom edge is cut off cleanly, so the bubbles look like they come
-    // down from above the screen.
-    final double headerLine = size.height * GameEngine.headerY;
+    // Paint the upper bubbles behind the translucent HUD, just like the
+    // rest of the board. Only clip at the viewport's actual top edge.
+    const double headerLine = 0;
 
     canvas.save();
     canvas.clipRect(
@@ -856,6 +801,10 @@ class _GameBoardPainter extends CustomPainter {
       final double bottomEdge = animatedY * size.height + r;
       if (bottomEdge <= headerLine) continue; // fully above the bar
       drawBubble(canvas, size, bubble, overrideY: animatedY);
+      if (!showLetters && starIds.contains(bubble.id)) {
+        final center = Offset(bubble.x * size.width, animatedY * size.height);
+        _paintGoldStar(canvas, center, r * .52);
+      }
     }
     canvas.restore();
 
@@ -887,7 +836,7 @@ class _GameBoardPainter extends CustomPainter {
   String _displayLetter(Bubble b) {
     if (hiddenIds.contains(b.id)) return '?';
     if (wildIds.contains(b.id)) return '★';
-    return b.letter;
+    return showLetters ? b.letter : '';
   }
 
   // The engine mutates the same list and the glow controller ticks
@@ -978,3 +927,69 @@ class _AimingLinePainter extends CustomPainter {
 // ================================================================
 // ANIMATED LAUNCHER RING
 // ================================================================
+
+void _paintGoldStar(Canvas canvas, Offset center, double radius) {
+  final path = Path();
+  for (int i = 0; i < 10; i++) {
+    final a = -pi / 2 + i * pi / 5;
+    final r = i.isEven ? radius : radius * .46;
+    final x = center.dx + cos(a) * r;
+    final y = center.dy + sin(a) * r;
+    if (i == 0) {
+      path.moveTo(x, y);
+    } else {
+      path.lineTo(x, y);
+    }
+  }
+  path.close();
+  canvas.drawPath(path, Paint()..color = const Color(0xFFFFC43D));
+  canvas.drawPath(
+    path,
+    Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2,
+  );
+}
+
+class _StarFlightPainter extends CustomPainter {
+  final List<FlyingPopBubble> stars;
+  final bool wordMode;
+  const _StarFlightPainter({required this.stars, required this.wordMode});
+  @override
+  void paint(Canvas canvas, Size size) {
+    // Same padding and thresholds as the header's star track.
+    final trackLeft = 14.0 + 46 + 16 + 14 + 2;
+    final trackWidth = size.width - trackLeft - 14 - 14 - 2;
+    for (final star in stars) {
+      final t = Curves.easeInOutCubic.transform(star.progress.clamp(0.0, 1.0));
+      final start = Offset(star.startX * size.width, star.startY * size.height);
+      final end = Offset(
+        trackLeft +
+            (trackWidth - 25) *
+                const [.5, .75, 1.0][star.starSlot.clamp(0, 2)] +
+            12.5,
+        wordMode ? 52 : 44,
+      );
+      final control = Offset(
+        (start.dx + end.dx) / 2 + 38,
+        min(start.dy, end.dy) - 45,
+      );
+      final point =
+          start * ((1 - t) * (1 - t)) +
+          control * (2 * (1 - t) * t) +
+          end * (t * t);
+      canvas.drawCircle(
+        point,
+        12,
+        Paint()
+          ..color = const Color(0x66FFD45C)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8),
+      );
+      _paintGoldStar(canvas, point, 10 + 4 * sin(pi * t));
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _StarFlightPainter oldDelegate) => true;
+}

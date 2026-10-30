@@ -1,3 +1,5 @@
+import 'game_mode.dart';
+
 import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
@@ -10,17 +12,24 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// This avoids progress ever being lost to a widget-tree timing
 /// issue (a screen popped early, a callback that didn't fire, etc).
 class ProgressService {
-  static const String _unlockedKey = 'word_bloom_unlocked_level';
-  static const String _starsKey = 'word_bloom_level_stars';
+  static String _unlockedKey(GameMode mode) => mode.isWordMode
+      ? 'word_bloom_unlocked_level'
+      : '${mode.name}_unlocked_level';
+  static String _starsKey(GameMode mode) =>
+      mode.isWordMode ? 'word_bloom_level_stars' : '${mode.name}_level_stars';
 
-  static Future<int> getUnlockedLevel() async {
+  static Future<int> getUnlockedLevel({
+    GameMode mode = GameMode.wordBloom,
+  }) async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getInt(_unlockedKey) ?? 1;
+    return prefs.getInt(_unlockedKey(mode)) ?? 1;
   }
 
-  static Future<Map<int, int>> getLevelStars() async {
+  static Future<Map<int, int>> getLevelStars({
+    GameMode mode = GameMode.wordBloom,
+  }) async {
     final prefs = await SharedPreferences.getInstance();
-    final String? raw = prefs.getString(_starsKey);
+    final String? raw = prefs.getString(_starsKey(mode));
     if (raw == null || raw.isEmpty) return {};
 
     try {
@@ -43,15 +52,21 @@ class ProgressService {
   /// Called the moment a level is won. Bumps the unlocked level (if
   /// this was the frontier level) and records the best star result
   /// for it, both persisted immediately.
-  static Future<void> saveLevelResult(int level, int stars) async {
+  static Future<void> saveLevelResult(
+    int level,
+    int stars, {
+    GameMode mode = GameMode.wordBloom,
+  }) async {
     final prefs = await SharedPreferences.getInstance();
+    if (level < 1) throw ArgumentError.value(level, 'level');
+    stars = stars.clamp(1, 3);
 
-    final int currentUnlocked = prefs.getInt(_unlockedKey) ?? 1;
+    final int currentUnlocked = prefs.getInt(_unlockedKey(mode)) ?? 1;
     if (level >= currentUnlocked) {
-      await prefs.setInt(_unlockedKey, level + 1);
+      await prefs.setInt(_unlockedKey(mode), level + 1);
     }
 
-    final Map<int, int> stored = await getLevelStars();
+    final Map<int, int> stored = await getLevelStars(mode: mode);
     final int existing = stored[level] ?? 0;
     if (stars > existing) {
       stored[level] = stars;
@@ -60,6 +75,6 @@ class ProgressService {
     final Map<String, int> encodable = stored.map(
       (lvl, st) => MapEntry(lvl.toString(), st),
     );
-    await prefs.setString(_starsKey, jsonEncode(encodable));
+    await prefs.setString(_starsKey(mode), jsonEncode(encodable));
   }
 }

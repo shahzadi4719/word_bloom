@@ -4,6 +4,9 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 
 import '../levels.dart';
+import '../bloom_visuals.dart';
+import '../booster_shop.dart' show showBoosterShop;
+import '../game_mode.dart';
 import '../word_bloom.dart';
 import '../progress_service.dart';
 import '../gift_service.dart';
@@ -17,7 +20,6 @@ const Color _kPink = Color(0xFFE0388C);
 const Color _kPinkLight = Color(0xFFFF9BC4);
 const Color _kPinkDark = Color(0xFFB0206B);
 const Color _kInk = Color(0xFF70465A);
-const Color _kInkSoft = Color(0xFF9A607A);
 
 /// Opens a popup with a soft blur, fade and "pop" scale animation.
 Future<T?> _showPrettyDialog<T>(BuildContext context, WidgetBuilder builder) {
@@ -27,7 +29,7 @@ Future<T?> _showPrettyDialog<T>(BuildContext context, WidgetBuilder builder) {
     barrierLabel: 'Dismiss',
     barrierColor: const Color(0x66381327),
     transitionDuration: const Duration(milliseconds: 300),
-    pageBuilder: (ctx, _, __) => SafeArea(
+    pageBuilder: (ctx, _, _) => SafeArea(
       child: Center(
         child: Material(type: MaterialType.transparency, child: builder(ctx)),
       ),
@@ -56,7 +58,8 @@ Future<T?> _showPrettyDialog<T>(BuildContext context, WidgetBuilder builder) {
 }
 
 class LevelSelectScreen extends StatefulWidget {
-  const LevelSelectScreen({super.key});
+  final GameMode mode;
+  const LevelSelectScreen({super.key, this.mode = GameMode.wordBloom});
 
   @override
   State<LevelSelectScreen> createState() => _LevelSelectScreenState();
@@ -70,17 +73,17 @@ class _LevelSelectScreenState extends State<LevelSelectScreen>
 
   // Coins are now loaded from GiftService (see _loadProgress).
   // If you already have your own coins source, change
-  // GiftService.getCoins() / addCoins() inside gift_service.dart.
+  // GiftService.getCoins(mode: widget.mode) / addCoins() inside gift_service.dart.
   int _coins = 0;
 
   // Gift boxes that the player has already opened.
   Set<int> _openedGifts = {};
 
-  int get _totalStars => _levelStars.values.fold(0, (a, b) => a + b);
-
   final ScrollController _scrollController = ScrollController();
 
-  static const int _totalLevels = 2000;
+  int _totalLevels = 200;
+  bool _mapReady = false;
+  bool _extendingMap = false;
 
   static const double _nodeSpacing = 172;
   static const double _nodeTop = 55;
@@ -103,21 +106,26 @@ class _LevelSelectScreenState extends State<LevelSelectScreen>
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_extendMapWhenNeeded);
     SoundService.instance.playMenuMusic();
     SoundService.instance.ensureStarted(); // background nature music
     _loadProgress(jumpToLevel: true);
   }
 
   Future<void> _loadProgress({bool jumpToLevel = false}) async {
-    final unlocked = await ProgressService.getUnlockedLevel();
-    final stars = await ProgressService.getLevelStars();
-    final coins = await GiftService.getCoins();
-    final openedGifts = await GiftService.getOpenedGifts();
+    final unlocked = await ProgressService.getUnlockedLevel(mode: widget.mode);
+    final stars = await ProgressService.getLevelStars(mode: widget.mode);
+    final coins = await GiftService.getCoins(mode: widget.mode);
+    final openedGifts = await GiftService.getOpenedGifts(mode: widget.mode);
 
     if (!mounted) return;
 
     setState(() {
-      _unlockedLevel = unlocked.clamp(1, _totalLevels);
+      _unlockedLevel = math.max(1, unlocked);
+      _totalLevels = math.max(
+        _totalLevels,
+        visibleLevelCountFor(_unlockedLevel),
+      );
       _levelStars = stars;
       _coins = coins;
       _openedGifts = openedGifts;
@@ -127,6 +135,7 @@ class _LevelSelectScreenState extends State<LevelSelectScreen>
     if (jumpToLevel) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _scrollToUnlockedLevel();
+        _mapReady = true;
       });
     }
   }
@@ -146,8 +155,39 @@ class _LevelSelectScreenState extends State<LevelSelectScreen>
     _scrollController.jumpTo(finalOffset);
   }
 
+  // Higher levels sit above the current path. Prepend a batch before the
+  // player reaches the top, then compensate for its height so the same
+  // level stays at the same screen position.
+  void _extendMapWhenNeeded() {
+    if (!_mapReady ||
+        _extendingMap ||
+        !mounted ||
+        !_scrollController.hasClients) {
+      return;
+    }
+    if (_scrollController.offset > _nodeSpacing * 4) return;
+
+    _extendingMap = true;
+    final double previousOffset = _scrollController.offset;
+    setState(() => _totalLevels += levelMapBatchSize);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_scrollController.hasClients) {
+        final position = _scrollController.position;
+        _scrollController.jumpTo(
+          (previousOffset + levelMapBatchSize * _nodeSpacing).clamp(
+            position.minScrollExtent,
+            position.maxScrollExtent,
+          ),
+        );
+      }
+      _extendingMap = false;
+    });
+  }
+
   @override
   void dispose() {
+    _scrollController.removeListener(_extendMapWhenNeeded);
     _scrollController.dispose();
     super.dispose();
   }
@@ -188,13 +228,16 @@ class _LevelSelectScreenState extends State<LevelSelectScreen>
     }
 
     // Random rewards are picked and saved right here.
-    final List<GiftReward> rewards = await GiftService.open(giftLevel);
+    final List<GiftReward> rewards = await GiftService.open(
+      giftLevel,
+      mode: widget.mode,
+    );
     if (!mounted || rewards.isEmpty) return;
 
     await showGiftOpenDialog(context, rewards);
     if (!mounted) return;
 
-    final int coins = await GiftService.getCoins();
+    final int coins = await GiftService.getCoins(mode: widget.mode);
     if (!mounted) return;
     setState(() {
       _coins = coins;
@@ -206,12 +249,13 @@ class _LevelSelectScreenState extends State<LevelSelectScreen>
     if (levelNumber > _unlockedLevel) return;
     SoundService.instance.click();
 
-    final GameLevel lv = getLevel(levelNumber);
+    final GameLevel lv = getLevel(levelNumber, mode: widget.mode);
 
     _showPrettyDialog(
       context,
       (dialogContext) => _LevelPreviewDialog(
         levelNumber: levelNumber,
+        mode: widget.mode,
         wordCount: lv.words.length,
         onClose: () => Navigator.pop(dialogContext),
         onPlay: () {
@@ -230,10 +274,11 @@ class _LevelSelectScreenState extends State<LevelSelectScreen>
       MaterialPageRoute(
         builder: (_) => WordBloom(
           startLevel: levelNumber,
+          mode: widget.mode,
           onLevelComplete: (level, stars) async {
-            await ProgressService.saveLevelResult(level, stars);
+            // Gameplay has already persisted this mode’s result.
 
-            await _loadProgress();
+            await _loadProgress(jumpToLevel: true);
           },
         ),
       ),
@@ -272,122 +317,109 @@ class _LevelSelectScreenState extends State<LevelSelectScreen>
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
-                    colors: [Color(0xFFFFF4F8), Color(0xFFF9DFEA), Color(0xFFFFEDF4)],
+                    colors: [
+                      Color(0xFFFFF4F8),
+                      Color(0xFFF9DFEA),
+                      Color(0xFFFFEDF4),
+                    ],
                   ),
                 ),
               ),
             ),
           ),
           SafeArea(
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: CustomPaint(painter: _RoadPainter(_scrollController)),
-            ),
-            ListView.builder(
-              controller: _scrollController,
-              reverse: false,
-              physics: const BouncingScrollPhysics(),
-              padding: const EdgeInsets.only(top: 105, bottom: 100),
-              itemCount: _totalLevels,
-              itemExtent: _nodeSpacing,
-              itemBuilder: (context, listIndex) {
-                final int level = _totalLevels - listIndex;
-                return _LevelTile(
-                  level: level,
-                  unlocked: level <= _unlockedLevel,
-                  current: level == _unlockedLevel,
-                  stars: _levelStars[level] ?? 0,
-                  onTap: () => _showLevelPreview(level),
-                );
-              },
-            ),
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: CustomPaint(
+                    painter: _RoadPainter(_scrollController, _totalLevels),
+                  ),
+                ),
+                ListView.builder(
+                  controller: _scrollController,
+                  reverse: false,
+                  physics: const BouncingScrollPhysics(),
+                  padding: const EdgeInsets.only(top: 105, bottom: 100),
+                  itemCount: _totalLevels,
+                  itemExtent: _nodeSpacing,
+                  itemBuilder: (context, listIndex) {
+                    final int level = _totalLevels - listIndex;
+                    return _LevelTile(
+                      level: level,
+                      unlocked: level <= _unlockedLevel,
+                      current: level == _unlockedLevel,
+                      stars: _levelStars[level] ?? 0,
+                      onTap: () => _showLevelPreview(level),
+                    );
+                  },
+                ),
 
-            // GIFT BOXES on the road (after every 11 levels + a few extra)
-            Positioned.fill(
-              child: GiftPathLayer(
-                controller: _scrollController,
-                unlockedLevel: _unlockedLevel,
-                openedGifts: _openedGifts,
-                totalLevels: _totalLevels,
-                nodeSpacing: _nodeSpacing,
-                topPad: 105,
-                nodeCenterY: _nodeCenterY,
-                xPattern: _xPattern,
-                onGiftTap: _onGiftTap,
-              ),
-            ),
+                // GIFT BOXES on the road (after every 11 levels + a few extra)
+                Positioned.fill(
+                  child: GiftPathLayer(
+                    controller: _scrollController,
+                    unlockedLevel: _unlockedLevel,
+                    openedGifts: _openedGifts,
+                    totalLevels: _totalLevels,
+                    nodeSpacing: _nodeSpacing,
+                    topPad: 105,
+                    nodeCenterY: _nodeCenterY,
+                    xPattern: _xPattern,
+                    onGiftTap: _onGiftTap,
+                  ),
+                ),
 
-            // Top bar: coins + stars + settings
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-                // transparent: the background picture shows through
-                // (only the pills / buttons themselves stay visible)
-                child: Row(
-                  children: [
-                    _RoundIconButton(
-                      icon: Icons.arrow_back_rounded,
-                      onTap: () {
-                        Navigator.pop(context);
-                      },
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _StatPill(
-                        icon: Icons.monetization_on_rounded,
-                        iconColor: const Color(0xFFFFB52E),
-                        leading: const CoinIcon(size: 30),
-                        value: '$_coins',
-                        showPlus: true,
-                        onPlusTap: () {
-                          // TODO: open shop / coin store
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _StatPill(
-                        icon: Icons.star_rounded,
-                        iconColor: const Color(0xFFFFC43D),
-                        value: '$_totalStars',
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    _AnimatedSettingsButton(
-                      onTap: () {
-                        _showPrettyDialog(
-                          context,
-                          (dialogContext) => _SettingsDialog(
-                            onClose: () => Navigator.pop(dialogContext),
+                // Top bar: coins + stars + settings
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: Container(
+                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                    // transparent: the background picture shows through
+                    // (only the pills / buttons themselves stay visible)
+                    child: Row(
+                      children: [
+                        BloomBackButton(
+                          onTap: () {
+                            Navigator.pop(context);
+                          },
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: _StatPill(
+                            icon: Icons.monetization_on_rounded,
+                            iconColor: const Color(0xFFFFB52E),
+                            leading: const CoinIcon(size: 30),
+                            value: '$_coins',
+                            showPlus: true,
+                            onPlusTap: () {
+                              showBoosterShop(context, mode: widget.mode).then((
+                                _,
+                              ) {
+                                if (mounted) _loadProgress();
+                              });
+                            },
                           ),
-                        );
-                      },
+                        ),
+                        const SizedBox(width: 10),
+                        _AnimatedSettingsButton(
+                          onTap: () {
+                            _showPrettyDialog(
+                              context,
+                              (dialogContext) => _SettingsDialog(
+                                onClose: () => Navigator.pop(dialogContext),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
-              ),
+              ],
             ),
-
-            // Bottom "Level N" button
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 16,
-              child: Center(
-                child: _PillButton(
-                  label: 'Level $_unlockedLevel',
-                  icon: Icons.play_arrow_rounded,
-                  onTap: () => _showLevelPreview(_unlockedLevel),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
+          ),
         ],
       ),
     );
@@ -447,12 +479,12 @@ class _LevelTile extends StatelessWidget {
 class _RoadPainter extends CustomPainter {
   final ScrollController controller;
 
-  _RoadPainter(this.controller) : super(repaint: controller);
+  _RoadPainter(this.controller, this._total) : super(repaint: controller);
 
   static const double _topPad = 105;
   static const double _spacing = _LevelSelectScreenState._nodeSpacing;
   static const double _cy = _LevelSelectScreenState._nodeCenterY;
-  static const int _total = _LevelSelectScreenState._totalLevels;
+  final int _total;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -540,7 +572,7 @@ class _RoadPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _RoadPainter old) =>
-      old.controller != controller;
+      old.controller != controller || old._total != _total;
 }
 
 class _LevelNode extends StatelessWidget {
@@ -849,7 +881,7 @@ class _PedestalGlowState extends State<_PedestalGlow>
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: _controller,
-      builder: (_, __) {
+      builder: (_, _) {
         final double t = Curves.easeInOut.transform(_controller.value);
         return Transform.scale(
           scale: 0.9 + 0.2 * t,
@@ -1028,7 +1060,7 @@ class _AnimatedSettingsButtonState extends State<_AnimatedSettingsButton>
       },
       child: AnimatedBuilder(
         animation: Listenable.merge([_idle, _tap]),
-        builder: (_, __) {
+        builder: (_, _) {
           final double glow =
               0.5 + 0.5 * math.sin(_idle.value * 2 * math.pi * 4);
           final double rotation =
@@ -1104,7 +1136,6 @@ class _AnimatedSettingsButtonState extends State<_AnimatedSettingsButton>
 class _DialogShell extends StatelessWidget {
   final Widget badge;
   final String title;
-  final String? subtitle;
   final List<Widget> children;
   final VoidCallback onClose;
 
@@ -1113,7 +1144,6 @@ class _DialogShell extends StatelessWidget {
     required this.title,
     required this.children,
     required this.onClose,
-    this.subtitle,
   });
 
   @override
@@ -1205,40 +1235,7 @@ class _DialogShell extends StatelessWidget {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text(
-                            title,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              fontSize: 26,
-                              fontWeight: FontWeight.w900,
-                              color: _kInk,
-                              letterSpacing: 0.3,
-                            ),
-                          ),
-                          if (subtitle != null) ...[
-                            const SizedBox(height: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                                vertical: 5,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.75),
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(
-                                  color: _kPinkLight.withValues(alpha: 0.5),
-                                ),
-                              ),
-                              child: Text(
-                                subtitle!,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                  color: _kInkSoft,
-                                ),
-                              ),
-                            ),
-                          ],
+                          BloomDialogTitle(title, size: 26),
                           const SizedBox(height: 18),
                           ...children,
                         ],
@@ -1256,31 +1253,11 @@ class _DialogShell extends StatelessWidget {
             Positioned(
               top: 58,
               right: 14,
-              child: GestureDetector(
+              child: BloomCloseButton(
                 onTap: () {
                   SoundService.instance.click();
                   onClose();
                 },
-                child: Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.white,
-                    boxShadow: [
-                      BoxShadow(
-                        color: _kPink.withValues(alpha: 0.2),
-                        blurRadius: 8,
-                        offset: const Offset(0, 3),
-                      ),
-                    ],
-                  ),
-                  child: const Icon(
-                    Icons.close_rounded,
-                    size: 20,
-                    color: _kInk,
-                  ),
-                ),
               ),
             ),
           ],
@@ -1350,12 +1327,14 @@ class _DialogBadge extends StatelessWidget {
 // Level preview popup
 // ─────────────────────────────────────────────────────────────
 class _LevelPreviewDialog extends StatelessWidget {
+  final GameMode mode;
   final int levelNumber;
   final int wordCount;
   final VoidCallback onPlay;
   final VoidCallback onClose;
 
   const _LevelPreviewDialog({
+    required this.mode,
     required this.levelNumber,
     required this.wordCount,
     required this.onPlay,
@@ -1366,8 +1345,7 @@ class _LevelPreviewDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     return _DialogShell(
       onClose: onClose,
-      title: 'Word Bloom',
-      subtitle: 'Level $levelNumber',
+      title: mode.title,
       badge: _DialogBadge(
         colors: const [Color(0xFFFFB3D1), Color(0xFFE0388C)],
         child: Padding(
@@ -1392,75 +1370,19 @@ class _LevelPreviewDialog extends StatelessWidget {
         ),
       ),
       children: [
-        // Goal guide
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.fromLTRB(12, 12, 16, 12),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.82),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: Colors.white),
-            boxShadow: [
-              BoxShadow(
-                color: _kPink.withValues(alpha: 0.12),
-                blurRadius: 12,
-                offset: const Offset(0, 5),
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 50,
-                height: 50,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(17),
-                  gradient: const LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [Color(0xFFC3A6F2), Color(0xFF8E6CCF)],
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFF8E6CCF).withValues(alpha: 0.35),
-                      blurRadius: 8,
-                      offset: const Offset(0, 3),
-                    ),
-                  ],
-                ),
-                child: const Icon(
-                  Icons.text_fields_rounded,
-                  size: 27,
-                  color: Colors.white,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'YOUR GOAL',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 1.4,
-                        color: _kInkSoft,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      wordCount == 1 ? 'Make 1 word' : 'Make $wordCount words',
-                      style: const TextStyle(
-                        fontSize: 19,
-                        fontWeight: FontWeight.w900,
-                        color: _kInk,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+        BloomGoalAnimation(mode: mode, height: 106),
+        Text(
+          mode.isWordMode
+              ? (wordCount == 1 ? 'Make 1 word' : 'Make $wordCount words')
+              : mode == GameMode.colorMatch
+              ? 'Match 3 of one color'
+              : 'Match 3 of one letter',
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            fontFamily: 'Fredoka',
+            fontSize: 17,
+            fontWeight: FontWeight.w800,
+            color: Color(0xFFBA3A87),
           ),
         ),
         const SizedBox(height: 20),
@@ -1527,16 +1449,6 @@ class _SettingsDialog extends StatelessWidget {
           icon: Icons.star_rounded,
           expand: true,
           onTap: onClose,
-        ),
-        const SizedBox(height: 12),
-        const Text(
-          'Word Bloom  •  v1.0',
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-            color: _kInkSoft,
-            letterSpacing: 0.5,
-          ),
         ),
       ],
     );
@@ -1627,21 +1539,21 @@ class _SettingsRowState extends State<_SettingsRow> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    widget.label,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w800,
-                      color: _kInk,
-                    ),
-                  ),
-                  const SizedBox(height: 1),
-                  Text(
-                    enabled ? 'On' : 'Off',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: enabled ? _kPink : const Color(0xFFA89EA3),
+                  BloomAnimatedLabel(widget.label, size: 20),
+                  const SizedBox(height: 3),
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 220),
+                    child: Text(
+                      enabled ? 'On' : 'Off',
+                      key: ValueKey(enabled),
+                      style: TextStyle(
+                        fontFamily: 'Fredoka',
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: enabled
+                            ? const Color(0xFFC3458D)
+                            : const Color(0xFF9C8A95),
+                      ),
                     ),
                   ),
                 ],
@@ -1813,49 +1725,6 @@ class _PillButtonState extends State<_PillButton>
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _RoundIconButton extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback onTap;
-
-  const _RoundIconButton({required this.icon, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      shape: const CircleBorder(),
-      child: InkWell(
-        onTap: () {
-          SoundService.instance.click();
-          onTap();
-        },
-        customBorder: const CircleBorder(),
-        child: Container(
-          width: 44,
-          height: 44,
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: Colors.white.withValues(alpha: 0.5),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.7),
-              width: 1.5,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.05),
-                blurRadius: 8,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Icon(icon, size: 22, color: const Color(0xFFE0287F)),
         ),
       ),
     );

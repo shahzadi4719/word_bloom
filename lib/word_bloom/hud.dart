@@ -1,112 +1,5 @@
 part of '../word_bloom.dart';
 
-class _WordGoalChip extends StatelessWidget {
-  final int completed;
-  final int total;
-
-  const _WordGoalChip({required this.completed, required this.total});
-
-  @override
-  Widget build(BuildContext context) {
-    final int safeTotal = total <= 0 ? 1 : total;
-    final int safeCompleted = completed.clamp(0, safeTotal);
-    final double progress = safeCompleted / safeTotal;
-
-    return Container(
-      padding: const EdgeInsets.fromLTRB(9, 7, 12, 7),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.92),
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: const Color(0xFFFFD4E5), width: 1.4),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFFFF4D96).withValues(alpha: 0.16),
-            blurRadius: 12,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 29,
-            height: 29,
-            decoration: const BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [Color(0xFFFFA9CD), Color(0xFFFF4D96)],
-              ),
-            ),
-            child: const Icon(
-              Icons.auto_awesome_rounded,
-              color: Colors.white,
-              size: 16,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text(
-                    'WORDS',
-                    style: TextStyle(
-                      fontSize: 10.5,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 1.15,
-                      color: Color(0xFF8B6170),
-                    ),
-                  ),
-                  const SizedBox(width: 5),
-                  Text(
-                    '$safeCompleted / $safeTotal',
-                    style: const TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w900,
-                      color: Color(0xFFE0287F),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              SizedBox(
-                width: 112,
-                height: 5,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      Container(color: const Color(0xFFFFE5EF)),
-                      FractionallySizedBox(
-                        alignment: Alignment.centerLeft,
-                        widthFactor: progress,
-                        child: Container(
-                          decoration: const BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [Color(0xFFFFA9CD), Color(0xFFFF4D96)],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _InfoChip extends StatelessWidget {
   final IconData icon;
   final String text;
@@ -233,264 +126,114 @@ class _ToastPill extends StatelessWidget {
 // ================================================================
 
 class _TopBar extends StatelessWidget {
-  final int level;
-  final int score;
-
-  /// 0..1 = words found / words needed (never goes backwards)
-  final double progress;
   final VoidCallback onPause;
-
+  final double progress;
+  final int collectedStars;
+  final int? completedWords;
+  final int totalWords;
   const _TopBar({
-    required this.level,
-    required this.score,
-    required this.progress,
     required this.onPause,
+    required this.progress,
+    this.collectedStars = 0,
+    this.completedWords,
+    this.totalWords = 1,
   });
-
-  static const List<double> _starAt = [0.5, 0.75, 1.0];
-
   @override
-  Widget build(BuildContext context) {
-    final double p = progress.clamp(0.0, 1.0);
-
-    return SizedBox(
-      height: 46,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _PauseButton(onTap: onPause),
-          const SizedBox(width: 10),
-
-          // LEVEL + STAR PROGRESS
-          Expanded(
-            child: _GlassBox(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: Center(
-                child: Row(
-                  children: [
-                    const _BadgeIcon(
-                      icon: Icons.auto_awesome,
-                      colors: [Color(0xFFFF9BC4), Color(0xFFFF4D96)],
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'LEVEL $level',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w900,
-                              fontSize: 11.5,
-                              letterSpacing: 0.9,
-                              height: 1.1,
-                              color: Color(0xFF7A4A3A),
-                            ),
-                          ),
-                          const SizedBox(height: 3),
-                          SizedBox(
-                            height: 22,
-                            child: LayoutBuilder(
-                              builder: (context, c) {
-                                final double w = c.maxWidth;
-                                // FIX: begin == end, so even if this widget is
-                                // ever rebuilt from scratch it starts AT the
-                                // current progress instead of zero. Later value
-                                // changes still animate smoothly (current -> new).
-                                return TweenAnimationBuilder<double>(
-                                  // new level = brand new bar, starting at 0 (no
-                                  // slide back from the previous level's fill)
-                                  key: ValueKey<int>(level),
-                                  tween: Tween<double>(begin: p, end: p),
-                                  duration: const Duration(milliseconds: 650),
-                                  curve: Curves.easeOutCubic,
-                                  builder: (context, v, _) {
-                                    return Stack(
-                                      clipBehavior: Clip.none,
-                                      children: [
-                                        // track
-                                        Positioned(
-                                          left: 0,
-                                          right: 0,
-                                          top: 6,
-                                          height: 12,
-                                          child: DecoratedBox(
-                                            decoration: BoxDecoration(
-                                              color: const Color(0xFFFFE3EF),
-                                              borderRadius:
-                                                  BorderRadius.circular(6),
-                                              border: Border.all(
-                                                color: const Color(0xFFFFD0E4),
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                        // fill (glossy gradient)
-                                        Positioned(
-                                          left: 0,
-                                          top: 6,
-                                          height: 12,
-                                          width: (w * v).clamp(0.0, w),
-                                          child: ClipRRect(
-                                            borderRadius: BorderRadius.circular(
-                                              6,
-                                            ),
-                                            child: Stack(
-                                              fit: StackFit.expand,
-                                              children: [
-                                                const DecoratedBox(
-                                                  decoration: BoxDecoration(
-                                                    gradient: LinearGradient(
-                                                      colors: [
-                                                        Color(0xFFFF9BC4),
-                                                        Color(0xFFFF4D96),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                ),
-                                                Positioned(
-                                                  top: 1.5,
-                                                  left: 4,
-                                                  right: 4,
-                                                  height: 3,
-                                                  child: DecoratedBox(
-                                                    decoration: BoxDecoration(
-                                                      color: Colors.white
-                                                          .withValues(
-                                                            alpha: 0.5,
-                                                          ),
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                            2,
-                                                          ),
-                                                    ),
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ),
-                                        // glowing head of the fill
-                                        if (v > 0.02)
-                                          Positioned(
-                                            left: (w * v - 7).clamp(
-                                              0.0,
-                                              w - 14,
-                                            ),
-                                            top: 5,
-                                            child: Container(
-                                              width: 14,
-                                              height: 14,
-                                              decoration: BoxDecoration(
-                                                shape: BoxShape.circle,
-                                                color: Colors.white,
-                                                border: Border.all(
-                                                  color: const Color(
-                                                    0xFFFF4D96,
-                                                  ),
-                                                  width: 2.5,
-                                                ),
-                                                boxShadow: [
-                                                  BoxShadow(
-                                                    color: const Color(
-                                                      0xFFFF4D96,
-                                                    ).withValues(alpha: 0.5),
-                                                    blurRadius: 6,
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ),
-                                        // the 3 stars light up as the fill reaches them
-                                        for (final double at in _starAt)
-                                          Positioned(
-                                            left: (w * at - 11).clamp(
-                                              0.0,
-                                              w - 22,
-                                            ),
-                                            top: 0,
-                                            child: AnimatedScale(
-                                              scale: v >= at - 0.001
-                                                  ? 1.25
-                                                  : 1.0,
-                                              duration: const Duration(
-                                                milliseconds: 350,
-                                              ),
-                                              curve: Curves.easeOutBack,
-                                              child: Icon(
-                                                Icons.star_rounded,
-                                                size: 22,
-                                                color: v >= at - 0.001
-                                                    ? const Color(0xFFFFB92E)
-                                                    : const Color(0xFFE8CCD8),
-                                                shadows: [
-                                                  Shadow(
-                                                    color: v >= at - 0.001
-                                                        ? const Color(
-                                                            0xFFFFD76A,
-                                                          )
-                                                        : Colors.white
-                                                              .withValues(
-                                                                alpha: 0.95,
-                                                              ),
-                                                    blurRadius: v >= at - 0.001
-                                                        ? 8
-                                                        : 2,
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ),
-                                      ],
-                                    );
-                                  },
-                                );
-                              },
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+  Widget build(BuildContext context) => SizedBox(
+    height: 64,
+    child: Row(
+      children: [
+        BloomBackButton(
+          onTap: onPause,
+          icon: Icons.pause_rounded,
+          label: 'Pause',
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Container(
+            height: 60,
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            decoration: BoxDecoration(
+              color: const Color(0x99FFE8F3),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: Colors.white, width: 2),
             ),
-          ),
-          const SizedBox(width: 10),
-
-          // SCORE
-          _GlassBox(
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            child: Center(
-              child: ConstrainedBox(
-                // Fixed minimum width: the score box must NOT change size
-                // when the score changes, otherwise the level bar next to it
-                // gets a few px wider/narrower and the fill "jumps".
-                constraints: const BoxConstraints(minWidth: 82),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const CoinIcon(size: 28),
-                    const SizedBox(width: 7),
-                    Text(
-                      '$score',
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (completedWords != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 5),
+                    child: Text(
+                      'WORDS  $completedWords / $totalWords',
                       style: const TextStyle(
-                        fontWeight: FontWeight.w900,
-                        fontSize: 15,
-                        color: Color(0xFF7A4A3A),
+                        fontFamily: 'Fredoka',
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
+                        color: Color(0xFFBB3482),
                       ),
                     ),
-                  ],
+                  ),
+                Expanded(
+                  child: LayoutBuilder(
+                    builder: (_, box) => Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        Container(
+                          height: 9,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE9C6DC),
+                            borderRadius: BorderRadius.circular(9),
+                          ),
+                        ),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: FractionallySizedBox(
+                            widthFactor: progress.clamp(0.0, 1.0),
+                            child: Container(
+                              height: 9,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(9),
+                                gradient: const LinearGradient(
+                                  colors: [
+                                    Color(0xFFFF9CCF),
+                                    Color(0xFFE0388C),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        for (var i = 0; i < 3; i++)
+                          Positioned(
+                            left:
+                                (box.maxWidth - 25) * const [0.5, 0.75, 1.0][i],
+                            child: AnimatedScale(
+                              scale: collectedStars > i ? 1.12 : 1,
+                              duration: const Duration(milliseconds: 250),
+                              child: Icon(
+                                Icons.star_rounded,
+                                size: 25,
+                                color: collectedStars > i
+                                    ? const Color(0xFFFFC74C)
+                                    : const Color(0xFFDABACE),
+                                shadows: const [
+                                  Shadow(color: Colors.white, blurRadius: 3),
+                                ],
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
                 ),
-              ),
+              ],
             ),
           ),
-        ],
-      ),
-    );
-  }
+        ),
+      ],
+    ),
+  );
 }
 
 /// The ONE coin icon used everywhere (game screen, level select, ...).
@@ -561,37 +304,6 @@ class _CoinIconPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-class _BadgeIcon extends StatelessWidget {
-  final IconData icon;
-  final List<Color> colors;
-
-  const _BadgeIcon({required this.icon, required this.colors});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 28,
-      height: 28,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: colors,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: colors.last.withValues(alpha: 0.35),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Icon(icon, size: 16, color: Colors.white),
-    );
-  }
-}
-
 class _PraisePopup extends StatelessWidget {
   final String text;
 
@@ -658,30 +370,6 @@ class _PraisePopup extends StatelessWidget {
 // PAUSE DIALOG (same style as the Settings card)
 // ================================================================
 
-class _GlassBox extends StatelessWidget {
-  final Widget child;
-  final EdgeInsets padding;
-
-  const _GlassBox({
-    required this.child,
-    this.padding = const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: padding,
-      decoration: BoxDecoration(
-        // see-through glass so the background picture shows behind it
-        color: Colors.white.withValues(alpha: 0.32),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.55)),
-      ),
-      child: child,
-    );
-  }
-}
-
 class _FoundWord extends StatelessWidget {
   final String word;
   final int done;
@@ -710,15 +398,7 @@ class _FoundWord extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            '$word ✓',
-            style: const TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w900,
-              color: Color(0xFFFF4D96),
-              letterSpacing: 2,
-            ),
-          ),
+          BloomAnimatedLabel('$word ✓', size: 22, textAlign: TextAlign.center),
           const SizedBox(height: 2),
           Text(
             '$done / $total',

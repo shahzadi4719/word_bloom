@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import 'booster_service.dart';
@@ -43,9 +44,9 @@ class BoosterBar extends StatelessWidget {
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
-                  const Color(0xFFFFB3D6).withValues(alpha: 0.38),
-                  const Color(0xFFFF8FC2).withValues(alpha: 0.30),
-                  const Color(0xFFC49BF2).withValues(alpha: 0.38),
+                  const Color(0xFFF996C9),
+                  const Color(0xFFEC64AB),
+                  const Color(0xFFB17ADE),
                 ],
               ),
               borderRadius: BorderRadius.circular(34),
@@ -130,7 +131,7 @@ ColorFilter _saturation(double s) {
 String _shortName(BoosterId id) {
   switch (id) {
     case BoosterId.bloomSwap:
-      return 'Swap';
+      return 'Super Swap';
     case BoosterId.bloomBomb:
       return 'Bomb';
     case BoosterId.rainbowBloom:
@@ -245,7 +246,7 @@ class _BoosterSlotState extends State<_BoosterSlot>
     Widget icon = SizedBox.expand(
       child: CustomPaint(painter: BoosterIconPainter(widget.def.id)),
     );
-    if (!usable) {
+    if (!widget.unlocked) {
       // dimmed, but still clearly coloured (not washed out)
       icon = Opacity(
         opacity: widget.unlocked ? 0.85 : 0.50,
@@ -256,14 +257,8 @@ class _BoosterSlotState extends State<_BoosterSlot>
       );
     }
 
-    final List<Color> orbColors = usable
+    final List<Color> orbColors = widget.unlocked
         ? [Colors.white, tint.mid, tint.deep]
-        : widget.unlocked
-        ? [
-            Colors.white,
-            Color.lerp(tint.mid, const Color(0xFFEDE6EB), 0.40)!,
-            Color.lerp(tint.deep, const Color(0xFFD9CCD5), 0.45)!,
-          ]
         : const [Color(0xFFFBF6F9), Color(0xFFE9DEE5), Color(0xFFD2C4CD)];
 
     final String label = widget.unlocked
@@ -405,7 +400,7 @@ class _BoosterSlotState extends State<_BoosterSlot>
                 overflow: TextOverflow.fade,
                 softWrap: false,
                 style: TextStyle(
-                  fontSize: 10.5,
+                  fontSize: widget.def.id == BoosterId.bloomSwap ? 8.8 : 10.5,
                   height: 1.1,
                   fontWeight: FontWeight.w900,
                   letterSpacing: 0.2,
@@ -414,9 +409,7 @@ class _BoosterSlotState extends State<_BoosterSlot>
                       : _plumDark.withValues(
                           alpha: widget.unlocked ? 0.75 : 0.55,
                         ),
-                  shadows: const [
-                    Shadow(color: Colors.white54, blurRadius: 3),
-                  ],
+                  shadows: const [Shadow(color: Colors.white54, blurRadius: 3)],
                 ),
               ),
             ],
@@ -676,7 +669,7 @@ class BoosterIconPainter extends CustomPainter {
         ..shader = const RadialGradient(
           center: Alignment(-0.4, -0.5),
           radius: 1.05,
-          colors: [Color(0xFF8B7A99), Color(0xFF3A2A47), Color(0xFF150C1B)],
+          colors: [Color(0xFFB59AD0), Color(0xFF4D235E), Color(0xFF1F0D32)],
           stops: [0.0, 0.5, 1.0],
         ).createShader(body),
     );
@@ -691,7 +684,7 @@ class BoosterIconPainter extends CustomPainter {
         ..style = PaintingStyle.stroke
         ..strokeWidth = br * 0.08
         ..strokeCap = StrokeCap.round
-        ..color = _rose.withValues(alpha: 0.80),
+        ..color = const Color(0xFFFF78C2),
     );
 
     // gloss
@@ -716,11 +709,7 @@ class BoosterIconPainter extends CustomPainter {
     canvas.translate(cc.dx, cc.dy);
     canvas.rotate(atan2(dir.dy, dir.dx) + pi / 2);
     final RRect cap = RRect.fromRectAndRadius(
-      Rect.fromCenter(
-        center: Offset.zero,
-        width: br * 0.62,
-        height: br * 0.34,
-      ),
+      Rect.fromCenter(center: Offset.zero, width: br * 0.62, height: br * 0.34),
       Radius.circular(br * 0.08),
     );
     canvas.drawRRect(

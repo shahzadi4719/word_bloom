@@ -1,9 +1,14 @@
 import 'dart:async';
 import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:confetti/confetti.dart';
 
 import 'game_engine.dart';
+import 'game_mode.dart';
+import 'bloom_visuals.dart';
+import 'booster_shop.dart' show showBoosterShop;
+import 'test_ads_service.dart';
 import 'bubble.dart';
 import 'progress_service.dart';
 import 'word_dictionary.dart';
@@ -21,20 +26,26 @@ part 'word_bloom/overlays.dart';
 
 class WordBloom extends StatefulWidget {
   final int startLevel;
+  final GameMode mode;
 
   /// Called the moment a level is actually won (not just visited),
   /// with the level number that was completed and the number of
   /// stars earned (1-3).
   final void Function(int level, int stars)? onLevelComplete;
 
-  const WordBloom({super.key, this.startLevel = 1, this.onLevelComplete});
+  const WordBloom({
+    super.key,
+    this.startLevel = 1,
+    this.mode = GameMode.wordBloom,
+    this.onLevelComplete,
+  });
 
   @override
   State<WordBloom> createState() => _WordBloomState();
 }
 
 class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
-  final GameEngine _engine = GameEngine();
+  late final GameEngine _engine = GameEngine(mode: widget.mode);
 
   late final AnimationController _gameLoopController;
   late final ConfettiController _confettiController;
@@ -60,7 +71,6 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
 
   /// How much of this level's score is already saved into the real coins.
   int _creditedScore = 0;
-  int _coins = 0; // the player's REAL total (same number as the level screen)
   // Game-loop timing (frame-rate independent stepping).
   static const bool _kFixedTimestep = true; // false karo agar bubbles tez lagen
   static const int _kStepMicros = 16667; // 60 updates per second
@@ -85,6 +95,7 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
 
   // ---- BOOSTERS ----
   final BoosterService _boosters = BoosterService.instance;
+  bool _superSwapActive = false;
   BoosterId? _armed;
   BoosterGrant? _pendingGrant;
 
@@ -137,13 +148,9 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
   void initState() {
     super.initState();
 
+    unawaited(TestAdsService.instance.preloadInterstitial());
     SoundService.instance.ensureStarted();
     SoundService.instance.playGameMusic(); // livelier loop while playing
-
-    // top-bar coins = the saved total, not this level's score
-    GiftService.getCoins().then((int v) {
-      if (mounted) setState(() => _coins = v);
-    });
 
     loadWordList().then((words) {
       debugPrint('Dictionary loaded: ${words.length} words');
@@ -237,20 +244,29 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
       });
     }
     _prevBonusLeft = bonusLeftNow;
-    if (_engine.gameOver && !_prevGameOver)
+    if (_engine.gameOver && !_prevGameOver) {
       SoundService.instance.play(Sfx.fail);
+    }
     _prevGameOver = _engine.gameOver;
 
     // NEW: praise when a word has just been completed.
-    final int wordCount = _engine.completedWords.length;
+    final int wordCount = widget.mode.isWordMode
+        ? _engine.completedWords.length
+        : _engine.matchesMade;
     if (wordCount > _lastWordCount) {
       SoundService.instance.play(Sfx.word);
-      _showPraise(wordCount, _engine.currentLevel?.words.length ?? 1);
+      _showPraise(
+        wordCount,
+        widget.mode.isWordMode
+            ? (_engine.currentLevel?.words.length ?? 1)
+            : wordCount + 1,
+      );
     }
     _lastWordCount = wordCount;
 
-    final double wordProgress =
-        wordCount / max(1, _engine.currentLevel?.words.length ?? 1);
+    final double wordProgress = widget.mode == GameMode.colorMatch
+        ? (_engine.collectedStars - _engine.flyingStars.length) / 3
+        : _engine.goalProgress;
     if (wordProgress > _shownProgress) _shownProgress = wordProgress;
 
     // COINS: every point scored is saved into the player's real coins right
@@ -259,8 +275,7 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
     if (nowScore > _creditedScore) {
       // leftover shots flying out after the win: one coin tick per +points
       if (_engine.goalReached) SoundService.instance.play(Sfx.coin);
-      GiftService.addCoins(nowScore - _creditedScore);
-      _coins += nowScore - _creditedScore;
+      GiftService.addCoins(nowScore - _creditedScore, mode: widget.mode);
       _creditedScore = nowScore;
     } else if (nowScore < _creditedScore) {
       _creditedScore = nowScore; // score was reset (retry / next level)
@@ -275,12 +290,14 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
         final int stars = _engine.starsEarned;
 
         debugPrint('WordBloom: saving level $completed with $stars stars');
-        ProgressService.saveLevelResult(completed, stars);
+        ProgressService.saveLevelResult(
+          completed,
+          stars,
+          mode: widget.mode,
+        ).then((_) => widget.onLevelComplete?.call(completed, stars));
 
         // BOOSTERS: milestone rewards + unlocks for this level.
         _claimBoosterRewards(completed);
-
-        widget.onLevelComplete?.call(completed, stars);
       }
     }
 
@@ -323,7 +340,8 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
 
   void _shoot() {
     // CHANGED: no shooting while the board is sliding down.
-    if (_engine.shooting ||
+    if (_superSwapActive ||
+        _engine.shooting ||
         _engine.gameOver ||
         _engine.levelComplete ||
         _engine.goalReached ||
@@ -387,35 +405,62 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
     });
   }
 
+  Future<void> _openBoosterShop(BoosterId id) async {
+    if (_engine.shooting || _engine.goalReached || _engine.gameOver) return;
+    setState(() => _isPaused = true);
+    try {
+      await showBoosterShop(context, selected: id, mode: widget.mode);
+    } finally {
+      if (mounted) setState(() => _isPaused = false);
+    }
+  }
+
   void _onBoosterTap(BoosterDef def) {
     if (_isPaused) return;
     SoundService.instance.click();
 
-    // Locked: show the "Reach Level X" popup.
-    if (!_boosters.isUnlocked(def)) {
-      showBoosterLockedPopup(context, def);
+    if (!_boosters.isUnlocked(def) || _boosters.quantity(def.id) <= 0) {
+      _openBoosterShop(def.id);
       return;
     }
-    if (_boosters.quantity(def.id) <= 0) return;
     if (_engine.gameOver || _engine.levelComplete || _engine.goalReached) {
       return;
     }
 
     if (def.id == BoosterId.bloomSwap) {
-      if (_engine.swapNextTwo(ignoreLimit: true)) {
-        _boosters.use(def.id);
-        setState(() => _swapTrigger++);
-      }
+      if (_engine.shooting || _engine.isScrolling) return;
+      setState(() {
+        _superSwapActive = !_superSwapActive;
+        _armed = null;
+      });
       return;
     }
+    _superSwapActive = false;
 
     // The other 4: tap to arm, tap again to cancel, then shoot normally.
     setState(() => _armed = (_armed == def.id) ? null : def.id);
   }
 
+  void _chooseSuperSwap(int lookahead) {
+    if (!_superSwapActive || _boosters.quantity(BoosterId.bloomSwap) <= 0) {
+      return;
+    }
+    if (!_engine.swapWithPreview(lookahead, ignoreLimit: true)) return;
+    _boosters.use(BoosterId.bloomSwap);
+    setState(() {
+      _superSwapActive = false;
+      _swapTrigger++;
+      _praise = 'Super Swap';
+      _praiseId++;
+    });
+    _praiseTimer?.cancel();
+    _praiseTimer = Timer(const Duration(milliseconds: 1400), () {
+      if (mounted) setState(() => _praise = null);
+    });
+  }
+
   Color _bubbleColor(String letter) {
-    return _engine.letterColors[letter.toUpperCase()] ??
-        const Color(0xFF7E8CFF);
+    return _engine.colorForToken(letter);
   }
 
   void _restartAndRetry() {
@@ -424,18 +469,37 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
     _lastWordCount = 0;
     _praise = null;
     _armed = null;
+    _superSwapActive = false;
     _pendingGrant = null;
     _shownProgress = 0;
     _engine.retryLevel();
     setState(() {});
   }
 
-  void _goNext() {
+  bool _nextLevelPending = false;
+
+  Future<void> _goNext() async {
+    if (_nextLevelPending || !_engine.levelComplete) return;
+    _nextLevelPending = true;
+    setState(() => _isPaused = true);
+    try {
+      final completedLevel = _engine.currentLevel?.number ?? 1;
+      await TestAdsService.instance.showInterstitialAfterLevel(completedLevel);
+      if (!mounted) return;
+      _goNextWithoutAd();
+    } finally {
+      _nextLevelPending = false;
+      if (mounted) setState(() => _isPaused = false);
+    }
+  }
+
+  void _goNextWithoutAd() {
     _confettiPlayed = false;
     _winSaved = false;
     _lastWordCount = 0;
     _praise = null;
     _armed = null;
+    _superSwapActive = false;
     _pendingGrant = null;
     _shownProgress = 0;
     _engine.goToNextLevel();
@@ -514,7 +578,8 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                         _engine.startLevel(widget.startLevel);
                         _initialized = true;
                         _aimY = _engine.boardTopY + 0.05;
-                        _showTutorial = widget.startLevel == 1;
+                        _showTutorial =
+                            widget.startLevel == 1 && widget.mode.isWordMode;
                         WidgetsBinding.instance.addPostFrameCallback((_) {
                           if (mounted) _entranceController.forward(from: 0);
                         });
@@ -565,6 +630,7 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                                 builder: (context, _) {
                                   return CustomPaint(
                                     painter: _GameBoardPainter(
+                                      showLetters: widget.mode.showLetters,
                                       bubbles: [
                                         ..._engine.bubbles,
                                         ..._engine.fallingBubbles,
@@ -577,6 +643,7 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                                       hiddenIds: _engine.hiddenIds,
                                       bombIds: _engine.bombIds,
                                       wildIds: _engine.wildIds,
+                                      starIds: _engine.starBubbleIds,
                                       entranceProgress:
                                           _entranceController.value,
                                       flyingPulse: _flyingGlowController.value,
@@ -650,10 +717,35 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                               left: 14,
                               right: 14,
                               child: _TopBar(
-                                level: _engine.currentLevel?.number ?? 1,
-                                score: _coins,
-                                progress: _shownProgress,
                                 onPause: _openPauseMenu,
+                                progress: _shownProgress,
+                                collectedStars:
+                                    widget.mode == GameMode.colorMatch
+                                    ? _engine.collectedStars -
+                                          _engine.flyingStars.length
+                                    : (_engine.goalReached
+                                          ? _engine.starsEarned
+                                          : (_shownProgress >= .75
+                                                ? 2
+                                                : (_shownProgress >= .5
+                                                      ? 1
+                                                      : 0))),
+                                completedWords: widget.mode.isWordMode
+                                    ? _engine.completedWords.length
+                                    : null,
+                                totalWords:
+                                    _engine.currentLevel?.words.length ?? 1,
+                              ),
+                            ),
+
+                            Positioned.fill(
+                              child: IgnorePointer(
+                                child: CustomPaint(
+                                  painter: _StarFlightPainter(
+                                    stars: _engine.flyingStars,
+                                    wordMode: widget.mode.isWordMode,
+                                  ),
+                                ),
                               ),
                             ),
 
@@ -666,9 +758,20 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                               child: SizedBox(
                                 height: 210,
                                 child: _LauncherRing(
-                                  currentLetter: _engine.getNextLetterPreview(),
-                                  nextLetter: _engine
-                                      .getLetterAfterNextPreview(),
+                                  muzzleOffsetY:
+                                      210 - size.height * (1 - _muzzle.dy),
+                                  thirdLetter: widget.mode.showLetters
+                                      ? _engine.getThirdLetterPreview()
+                                      : '',
+                                  thirdColor: _bubbleColor(
+                                    _engine.getThirdLetterPreview(),
+                                  ),
+                                  currentLetter: widget.mode.showLetters
+                                      ? _engine.getNextLetterPreview()
+                                      : '',
+                                  nextLetter: widget.mode.showLetters
+                                      ? _engine.getLetterAfterNextPreview()
+                                      : '',
                                   currentColor:
                                       _armedSpecial == ShotSpecial.none
                                       ? _bubbleColor(
@@ -684,7 +787,15 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                                   shotsRemaining: _remainingShots,
                                   shotTrigger: _shotTrigger,
                                   swapTrigger: _swapTrigger,
-                                  onSwapTap: _handleSwap,
+                                  showSuperSwap: _superSwapActive,
+                                  onThirdTap: () => _chooseSuperSwap(2),
+                                  onSwapTap: () {
+                                    if (_superSwapActive) {
+                                      _chooseSuperSwap(1);
+                                    } else {
+                                      _handleSwap();
+                                    }
+                                  },
                                 ),
                               ),
                             ),
@@ -696,6 +807,7 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                                 child: CustomPaint(
                                   painter: _BonusShotPainter(
                                     shots: _engine.bonusShots,
+                                    showLetters: widget.mode.showLetters,
                                     radiusFrac: _engine.bubbleRadius,
                                   ),
                                 ),
@@ -705,39 +817,37 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                             // WORD GOAL + OPTIONAL TIMER
                             Positioned(
                               key: const ValueKey('word_goal'),
-                              top: 68,
-                              left: 14,
+                              top: 78,
+                              left: 72,
                               right: 14,
                               child: IgnorePointer(
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    _WordGoalChip(
-                                      completed: _engine.completedWords.length,
-                                      total:
-                                          _engine.currentLevel?.words.length ??
-                                          1,
-                                    ),
-                                    if (_engine.timeLimit > 0) ...[
-                                      const SizedBox(width: 8),
-                                      _InfoChip(
-                                        icon: Icons.timer_rounded,
-                                        text: _formatTime(_engine.timeLeft),
-                                        color: _engine.timeLeft <= 10
-                                            ? const Color(0xFFE0554C)
-                                            : const Color(0xFF7A4A3A),
-                                      ),
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  alignment: Alignment.topCenter,
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (_engine.timeLimit > 0) ...[
+                                        const SizedBox(width: 8),
+                                        _InfoChip(
+                                          icon: Icons.timer_rounded,
+                                          text: _formatTime(_engine.timeLeft),
+                                          color: _engine.timeLeft <= 10
+                                              ? const Color(0xFFE0554C)
+                                              : const Color(0xFF7A4A3A),
+                                        ),
+                                      ],
+                                      if (_armed != null) ...[
+                                        const SizedBox(width: 8),
+                                        _InfoChip(
+                                          icon: Icons.auto_awesome,
+                                          text:
+                                              '${boosterDef(_armed!).name} ready',
+                                          color: const Color(0xFFE0287F),
+                                        ),
+                                      ],
                                     ],
-                                    if (_armed != null) ...[
-                                      const SizedBox(width: 8),
-                                      _InfoChip(
-                                        icon: Icons.auto_awesome,
-                                        text:
-                                            '${boosterDef(_armed!).name} ready',
-                                        color: const Color(0xFFE0287F),
-                                      ),
-                                    ],
-                                  ],
+                                  ),
                                 ),
                               ),
                             ),
@@ -831,10 +941,11 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                   ),
                 ),
 
+                const SizedBox(height: 24),
                 // BOOSTER BAR - below the game area, never over the shooter.
                 BoosterBar(
                   service: _boosters,
-                  armed: _armed,
+                  armed: _superSwapActive ? BoosterId.bloomSwap : _armed,
                   onTap: _onBoosterTap,
                 ),
               ],

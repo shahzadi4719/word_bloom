@@ -1,5 +1,9 @@
+import 'dart:collection';
+
+import 'game_mode.dart';
 
 import 'dart:math';
+
 import 'word_dictionary.dart';
 
 // ============================================================
@@ -36,12 +40,13 @@ class GameLevel {
 
   int get wordCount => words.length;
 
-  int get minWordLength => words.map((w) => w.length).reduce(min);
+  int get minWordLength =>
+      words.isEmpty ? 0 : words.map((w) => w.length).reduce(min);
 
-  int get maxWordLength => words.map((w) => w.length).reduce(max);
+  int get maxWordLength =>
+      words.isEmpty ? 0 : words.map((w) => w.length).reduce(max);
 
-  int get totalRequiredLetters =>
-      words.fold<int>(0, (t, w) => t + w.length);
+  int get totalRequiredLetters => words.fold<int>(0, (t, w) => t + w.length);
 }
 
 // ============================================================
@@ -90,7 +95,13 @@ const Map<String, String> wordHints = {
 // SETTINGS
 // ============================================================
 
-const int totalAutoLevels = 2000;
+/// Compatibility window for existing callers; NOT a gameplay limit.
+const int levelMapBatchSize = 100;
+const int totalAutoLevels = levelMapBatchSize * 2;
+
+/// Always leave a full batch of future levels above the unlocked frontier.
+int visibleLevelCountFor(int unlocked) =>
+    ((max(1, unlocked) - 1) ~/ levelMapBatchSize + 2) * levelMapBatchSize;
 
 /// Hand-made levels.
 /// Anything put here replaces the generated level.
@@ -172,9 +183,7 @@ List<int> lengthRangeFor(int n) => _lengthRange(n);
 String lengthLabelFor(int n) {
   final r = _lengthRange(n);
 
-  return r[0] == r[1]
-      ? '${r[0]} LETTER WORDS'
-      : '${r[0]}–${r[1]} LETTER WORDS';
+  return r[0] == r[1] ? '${r[0]} LETTER WORDS' : '${r[0]}–${r[1]} LETTER WORDS';
 }
 
 // ============================================================
@@ -221,8 +230,7 @@ int _distractorCount(int n) {
 // Create the unique word list only once.
 List<String>? _cachedUniqueBank;
 
-List<String> get _uniqueBank =>
-    _cachedUniqueBank ??= wordBank.toSet().toList();
+List<String> get _uniqueBank => _cachedUniqueBank ??= wordBank.toSet().toList();
 
 // Cache words for each length range.
 // For example, the 3–3 pool is created only once and reused.
@@ -232,9 +240,7 @@ List<String> _getWordPool(int lo, int hi) {
   final key = '$lo-$hi';
 
   return _wordPoolCache.putIfAbsent(key, () {
-    return _uniqueBank
-        .where((w) => w.length >= lo && w.length <= hi)
-        .toList();
+    return _uniqueBank.where((w) => w.length >= lo && w.length <= hi).toList();
   });
 }
 
@@ -267,9 +273,11 @@ List<String> _pickWords(int n, Random rnd) {
   final Set<int> tried = {};
   final int maxAttempts = min(pool.length, count * 50);
 
-  for (int attempt = 0;
-      attempt < maxAttempts && picked.length < count;
-      attempt++) {
+  for (
+    int attempt = 0;
+    attempt < maxAttempts && picked.length < count;
+    attempt++
+  ) {
     final int index = rnd.nextInt(pool.length);
 
     if (!tried.add(index)) {
@@ -304,11 +312,7 @@ List<String> _pickWords(int n, Random rnd) {
 // LETTERS
 // ============================================================
 
-List<String> _createLetters(
-  List<String> words,
-  int n,
-  Random rnd,
-) {
+List<String> _createLetters(List<String> words, int n, Random rnd) {
   final letters = <String>[];
 
   // Every target word's letters must be present.
@@ -348,21 +352,18 @@ List<String> _createHints(List<String> words, int n) {
 // SHOTS
 // ============================================================
 
-double _shotRatio(int n) =>
-    2.2 + (n.clamp(1, 2000) / 2000) * 0.8;
+double _shotRatio(int n) => 2.2 + (n.clamp(1, 2000) / 2000) * 0.8;
 
 int _calculateMaxShots(List<String> words, int n, Random rnd) {
-  final int required =
-      words.fold<int>(0, (t, w) => t + w.length);
+  final int required = words.fold<int>(0, (t, w) => t + w.length);
 
   final int byLetters = (required * _shotRatio(n)).round();
-  final int floorShots = 24 + n ~/ 60;
+  final int floorShots = 24 + min(n, 2000) ~/ 60;
 
   // Tiny random variation between neighbouring levels.
   final int wiggle = n <= 5 ? 0 : rnd.nextInt(3);
 
-  return max(max(byLetters, floorShots), required + 12) +
-      wiggle;
+  return max(max(byLetters, floorShots), required + 12) + wiggle;
 }
 
 // ============================================================
@@ -484,23 +485,75 @@ GameLevel _createLevel(int n) {
 // LEVEL LIST + GET LEVEL
 // ============================================================
 
-late List<GameLevel> levels;
+/// Lazily evaluated compatibility list. Only requested levels are generated.
+/// A bounded cache avoids retaining thousands of generated level objects.
+class _GeneratedLevels extends ListBase<GameLevel> {
+  int _length = totalAutoLevels;
+  final Map<int, GameLevel> _cache = {};
+  @override
+  int get length => _length;
+  @override
+  set length(int value) {
+    if (value < 0) throw RangeError.value(value, 'length');
+    _length = value;
+    _cache.removeWhere((key, _) => key >= value);
+  }
 
+  @override
+  GameLevel operator [](int index) {
+    RangeError.checkValidIndex(index, this);
+    final cached = _cache[index];
+    if (cached != null) return cached;
+    final level = _createLevel(index + 1);
+    if (_cache.length >= 128) _cache.remove(_cache.keys.first);
+    _cache[index] = level;
+    return level;
+  }
+
+  @override
+  void operator []=(int index, GameLevel value) {
+    RangeError.checkValidIndex(index, this);
+    _cache[index] = value;
+  }
+}
+
+List<GameLevel> levels = _GeneratedLevels();
 void generateLevels() {
-  levels = List.generate(
-    totalAutoLevels,
-    (index) => _createLevel(index + 1),
+  levels = _GeneratedLevels();
+}
+
+GameLevel getLevel(int levelNumber, {GameMode mode = GameMode.wordBloom}) {
+  final n = max(1, levelNumber);
+  if (mode.isWordMode) {
+    return n <= levels.length ? levels[n - 1] : _createLevel(n);
+  }
+  // Small symbol pools create practical 3+ matches. Colors are assigned
+  // by the engine; tokens remain internal in Color Match.
+  final pool = matchSymbolsFor(n);
+  final rnd = Random(n * 7919 + mode.index * 104729);
+  final letters = List<String>.generate(
+    72,
+    (_) => pool[rnd.nextInt(pool.length)],
+  );
+  return GameLevel(
+    number: n,
+    words: const [],
+    hints: const [],
+    letters: letters,
+    maxShots: 40 + min(20, n ~/ 100),
+    world: worldFor(n),
+    difficulty: _difficultyLabels[worldFor(n) - 1],
+    specialTier: _specialTierFor(n),
   );
 }
 
-GameLevel getLevel(int levelNumber) {
-  if (levelNumber < 1) {
-    levelNumber = 1;
-  }
-
-  if (levelNumber <= levels.length) {
-    return levels[levelNumber - 1];
-  }
-
-  return _createLevel(levelNumber);
-}
+List<String> matchSymbolsFor(int n) => 'ABCDEF'
+    .substring(
+      0,
+      n < 15
+          ? 4
+          : n < 61
+          ? 5
+          : 6,
+    )
+    .split('');

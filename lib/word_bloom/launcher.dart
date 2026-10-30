@@ -5,12 +5,17 @@ enum _RingSpin { shot, swap }
 class _LauncherRing extends StatefulWidget {
   final String currentLetter;
   final String nextLetter;
+  final String thirdLetter;
+  final Color thirdColor;
+  final double muzzleOffsetY;
   final Color currentColor;
   final Color nextColor;
   final int shotsRemaining;
   final int shotTrigger;
   final int swapTrigger;
   final VoidCallback onSwapTap;
+  final VoidCallback onThirdTap;
+  final bool showSuperSwap;
 
   /// Booster that is armed right now: its icon sits on the ring's ball.
   final BoosterId? armed;
@@ -18,12 +23,17 @@ class _LauncherRing extends StatefulWidget {
   const _LauncherRing({
     required this.currentLetter,
     required this.nextLetter,
+    required this.thirdLetter,
+    required this.thirdColor,
+    required this.muzzleOffsetY,
     required this.currentColor,
     required this.nextColor,
     required this.shotsRemaining,
     required this.shotTrigger,
     required this.swapTrigger,
     required this.onSwapTap,
+    required this.onThirdTap,
+    this.showSuperSwap = false,
     this.armed,
   });
 
@@ -40,7 +50,8 @@ class _LauncherRingState extends State<_LauncherRing>
   _RingSpin _spinKind = _RingSpin.shot;
 
   static const double _topAngle = -pi / 2;
-  static const double _nextAngle = pi / 6;
+  static const double _nextAngle = .08;
+  static const double _thirdAngle = .77;
 
   @override
   void initState() {
@@ -88,8 +99,11 @@ class _LauncherRingState extends State<_LauncherRing>
       builder: (context, constraints) {
         final Size size = Size(constraints.maxWidth, constraints.maxHeight);
 
-        final Offset center = Offset(size.width / 2, size.height * 0.42);
-        final double ringRadius = min(size.width, size.height) * 0.37;
+        final geometry = _launcherGeometry(size, widget.muzzleOffsetY);
+        final Offset center = geometry.center;
+        final double ringRadius = geometry.radius;
+        final nextDiameter = min(42.0, ringRadius * .66);
+        final thirdDiameter = min(36.0, ringRadius * .57);
 
         Offset onRing(double angle) {
           return Offset(
@@ -127,6 +141,7 @@ class _LauncherRingState extends State<_LauncherRing>
                 Positioned.fill(
                   child: CustomPaint(
                     painter: _LauncherRingPainter(
+                      muzzleOffsetY: widget.muzzleOffsetY,
                       rotation: rotation,
                       pulse: sin(rotation) * 0.5 + 0.5,
                       color: widget.currentColor,
@@ -151,20 +166,20 @@ class _LauncherRingState extends State<_LauncherRing>
                   ),
                 ),
                 Positioned(
-                  left: currentPos.dx - 36,
-                  top: currentPos.dy - 36,
+                  left: currentPos.dx - 34.56,
+                  top: currentPos.dy - 34.56,
                   child: IgnorePointer(
                     child: _AnimatedShooterBubble(
                       letter: widget.currentLetter,
                       color: widget.currentColor,
-                      size: 72,
+                      size: 69.12,
                       booster: widget.armed,
                     ),
                   ),
                 ),
                 Positioned(
-                  left: nextPos.dx - 21,
-                  top: nextPos.dy - 21,
+                  left: nextPos.dx - nextDiameter / 2,
+                  top: nextPos.dy - nextDiameter / 2,
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
                     onTap: widget.onSwapTap,
@@ -173,11 +188,27 @@ class _LauncherRingState extends State<_LauncherRing>
                       child: _GlossyBubble(
                         letter: widget.nextLetter,
                         color: widget.nextColor,
-                        size: 42,
+                        size: nextDiameter,
                       ),
                     ),
                   ),
                 ),
+                if (widget.showSuperSwap)
+                  Positioned(
+                    left: onRing(_thirdAngle).dx - thirdDiameter / 2,
+                    top: onRing(_thirdAngle).dy - thirdDiameter / 2,
+                    child: GestureDetector(
+                      onTap: widget.onThirdTap,
+                      child: Opacity(
+                        opacity: nextOpacity.clamp(0.0, 1.0),
+                        child: _GlossyBubble(
+                          letter: widget.thirdLetter,
+                          color: widget.thirdColor,
+                          size: thirdDiameter,
+                        ),
+                      ),
+                    ),
+                  ),
               ],
             );
           },
@@ -255,20 +286,20 @@ class _AnimatedShooterBubbleState extends State<_AnimatedShooterBubble>
                         ),
                       )
                     : Text(
-                  widget.letter,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: widget.size * 0.42,
-                    fontWeight: FontWeight.w900,
-                    shadows: const [
-                      Shadow(
-                        color: Colors.black45,
-                        blurRadius: 3,
-                        offset: Offset(0, 2),
+                        widget.letter,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: widget.size * 0.42,
+                          fontWeight: FontWeight.w900,
+                          shadows: const [
+                            Shadow(
+                              color: Colors.black45,
+                              blurRadius: 3,
+                              offset: Offset(0, 2),
+                            ),
+                          ],
+                        ),
                       ),
-                    ],
-                  ),
-                ),
               ),
             ),
           ),
@@ -294,41 +325,7 @@ class _ShooterBubblePainter extends CustomPainter {
       ..maskFilter = MaskFilter.blur(BlurStyle.normal, 10 + glow * 4);
     canvas.drawCircle(center, radius * 0.94, glowPaint);
 
-    final Paint shadow = Paint()
-      ..color = Colors.black.withValues(alpha: 0.20)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
-    canvas.drawCircle(center.translate(0, 4), radius * 0.88, shadow);
-
-    final Paint bubblePaint = Paint()
-      ..shader = RadialGradient(
-        center: const Alignment(-0.35, -0.45),
-        radius: 0.95,
-        colors: [
-          Colors.white.withValues(alpha: 0.70),
-          color,
-          color.withValues(alpha: 0.72),
-        ],
-        stops: const [0.0, 0.30, 1.0],
-      ).createShader(Rect.fromCircle(center: center, radius: radius));
-    canvas.drawCircle(center, radius * 0.90, bubblePaint);
-
-    final Paint shine = Paint()..color = Colors.white.withValues(alpha: 0.72);
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: center.translate(-radius * 0.24, -radius * 0.38),
-        width: radius * 0.52,
-        height: radius * 0.28,
-      ),
-      shine,
-    );
-
-    final Paint smallShine = Paint()
-      ..color = Colors.white.withValues(alpha: 0.38);
-    canvas.drawCircle(
-      center.translate(radius * 0.34, -radius * 0.28),
-      radius * 0.09,
-      smallShine,
-    );
+    paintBloomBubble(canvas, center, radius * .90, color, shimmer: glow);
   }
 
   @override
@@ -341,12 +338,25 @@ class _ShooterBubblePainter extends CustomPainter {
 // RING PAINTER
 // ================================================================
 
+({Offset center, double radius}) _launcherGeometry(Size size, double muzzleY) {
+  final radius = max(
+    26.0,
+    min(
+      size.height * .37,
+      min(size.width * .22, (size.height - muzzleY) * .48),
+    ),
+  );
+  return (center: Offset(size.width / 2, muzzleY + radius), radius: radius);
+}
+
 class _LauncherRingPainter extends CustomPainter {
+  final double muzzleOffsetY;
   final double rotation;
   final double pulse;
   final Color color;
 
   const _LauncherRingPainter({
+    required this.muzzleOffsetY,
     required this.rotation,
     required this.pulse,
     required this.color,
@@ -354,8 +364,9 @@ class _LauncherRingPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final Offset center = Offset(size.width / 2, size.height * 0.42);
-    final double ringRadius = min(size.width, size.height) * 0.37;
+    final geometry = _launcherGeometry(size, muzzleOffsetY);
+    final Offset center = geometry.center;
+    final double ringRadius = geometry.radius;
 
     final Paint shadowPaint = Paint()
       ..color = Colors.black.withValues(alpha: 0.12)
@@ -418,7 +429,8 @@ class _LauncherRingPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _LauncherRingPainter oldDelegate) {
-    return oldDelegate.rotation != rotation ||
+    return oldDelegate.muzzleOffsetY != muzzleOffsetY ||
+        oldDelegate.rotation != rotation ||
         oldDelegate.pulse != pulse ||
         oldDelegate.color != color;
   }
