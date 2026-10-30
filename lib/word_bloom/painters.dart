@@ -993,3 +993,151 @@ class _StarFlightPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _StarFlightPainter oldDelegate) => true;
 }
+
+class _BoosterPreviewPainter extends CustomPainter {
+  final ({
+    List<Bubble> victims,
+    Offset center,
+    double radius,
+    List<Offset> path,
+  })
+  preview;
+  final Color color;
+  final ShotSpecial special;
+  const _BoosterPreviewPainter({
+    required this.preview,
+    required this.color,
+    required this.special,
+  });
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.save();
+    canvas.clipRect(Offset.zero & size);
+    final center = Offset(
+      preview.center.dx * size.width,
+      preview.center.dy * size.height,
+    );
+    if (preview.radius > 0) {
+      canvas.drawCircle(
+        center,
+        preview.radius * size.width,
+        Paint()..color = color.withValues(alpha: .12),
+      );
+      canvas.drawCircle(
+        center,
+        preview.radius * size.width,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2
+          ..color = Colors.white.withValues(alpha: .8),
+      );
+    }
+    if (special == ShotSpecial.lightning && preview.path.length >= 2) {
+      canvas.drawLine(
+        Offset(
+          preview.path.first.dx * size.width,
+          preview.path.first.dy * size.height,
+        ),
+        Offset(
+          preview.path.last.dx * size.width,
+          preview.path.last.dy * size.height,
+        ),
+        Paint()
+          ..strokeWidth = 16
+          ..color = color.withValues(alpha: .18)
+          ..strokeCap = StrokeCap.round,
+      );
+    }
+    for (final bubble in preview.victims) {
+      final p = Offset(bubble.x * size.width, bubble.y * size.height);
+      final r = bubble.radius * size.width;
+      canvas.drawCircle(
+        p,
+        r,
+        Paint()..color = Colors.white.withValues(alpha: .24),
+      );
+      canvas.drawCircle(
+        p,
+        r + 2,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.5
+          ..color = Colors.white,
+      );
+    }
+    final label = switch (special) {
+      ShotSpecial.bomb => 'Bomb',
+      ShotSpecial.flower => 'Blast',
+      ShotSpecial.rainbow => 'Rainbow',
+      ShotSpecial.lightning => 'Lightning',
+      ShotSpecial.none => '',
+    };
+    final tp = TextPainter(
+      text: TextSpan(
+        text: '$label · ${preview.victims.length} bubbles',
+        style: const TextStyle(
+          fontFamily: 'Fredoka',
+          fontSize: 15,
+          color: Colors.white,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    final x = (center.dx - tp.width / 2)
+        .clamp(12.0, max(12.0, size.width - tp.width - 12))
+        .toDouble();
+    final y = (center.dy + size.width * .12)
+        .clamp(size.height * .18, size.height * .73)
+        .toDouble();
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(x - 8, y - 6, tp.width + 16, tp.height + 12),
+        const Radius.circular(14),
+      ),
+      Paint()..color = const Color(0xFFC52F83),
+    );
+    tp.paint(canvas, Offset(x, y));
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _BoosterPreviewPainter oldDelegate) => true;
+}
+
+class _LiveLightningPainter extends CustomPainter {
+  final Offset start, end;
+  const _LiveLightningPainter({required this.start, required this.end});
+  @override
+  void paint(Canvas canvas, Size size) {
+    final a = Offset(start.dx * size.width, start.dy * size.height);
+    final b = Offset(end.dx * size.width, end.dy * size.height);
+    canvas.drawLine(
+      a,
+      b,
+      Paint()
+        ..strokeWidth = 19
+        ..color = const Color(0x889F7FFF)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 7)
+        ..strokeCap = StrokeCap.round,
+    );
+    canvas.drawLine(
+      a,
+      b,
+      Paint()
+        ..strokeWidth = 7
+        ..color = const Color(0xFF91DCFF)
+        ..strokeCap = StrokeCap.round,
+    );
+    canvas.drawLine(
+      a,
+      b,
+      Paint()
+        ..strokeWidth = 2.5
+        ..color = Colors.white
+        ..strokeCap = StrokeCap.round,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _LiveLightningPainter oldDelegate) => true;
+}

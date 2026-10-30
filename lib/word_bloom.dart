@@ -707,6 +707,46 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                                 ),
                               ),
 
+                            if (_isAiming &&
+                                _armedSpecial != ShotSpecial.none &&
+                                !_engine.shooting)
+                              Positioned.fill(
+                                child: IgnorePointer(
+                                  child: CustomPaint(
+                                    painter: _BoosterPreviewPainter(
+                                      preview: _engine.previewBooster(
+                                        special: _armedSpecial,
+                                        startX: _muzzle.dx,
+                                        startY: _muzzle.dy,
+                                        targetX: _aimX,
+                                        targetY: _aimY,
+                                      ),
+                                      color: GameEngine.specialColor(
+                                        _armedSpecial,
+                                      ),
+                                      special: _armedSpecial,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            if (_engine.shooting &&
+                                _engine.flyingSpecial ==
+                                    ShotSpecial.lightning &&
+                                _engine.flyingBubble != null)
+                              Positioned.fill(
+                                child: IgnorePointer(
+                                  child: CustomPaint(
+                                    painter: _LiveLightningPainter(
+                                      start: _muzzle,
+                                      end: Offset(
+                                        _engine.flyingBubble!.x,
+                                        _engine.flyingBubble!.y,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+
                             // (header band removed: the background picture shows
                             // behind the top bar now)
 

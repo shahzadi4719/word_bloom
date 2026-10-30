@@ -1070,7 +1070,7 @@ class GameEngine {
     final List<Offset> pts = [Offset(px, py)];
     Bubble? hit;
 
-    final int maxBounces = beam ? 3 : 10;
+    final int maxBounces = beam ? 1 : 10;
     for (int bounce = 0; bounce < maxBounces; bounce++) {
       double tWall = double.infinity;
       if (dx > 1e-9) tWall = (hi - px) / dx;
@@ -1231,8 +1231,7 @@ class GameEngine {
       flyingBubble!.x = end.dx;
       flyingBubble!.y = end.dy;
       _lastHitBubble = _flightHit;
-      if (_flightSpecial == ShotSpecial.none ||
-          _flightSpecial == ShotSpecial.rainbow) {
+      if (_flightSpecial == ShotSpecial.none) {
         _attachFlyingBubble(snapOverride: _flightLanding);
       } else {
         _resolveSpecialShot();
@@ -1992,64 +1991,97 @@ class GameEngine {
     shooting = false;
     _flightSpecial = ShotSpecial.none;
 
-    switch (kind) {
-      case ShotSpecial.bomb:
-        _burstAt(center, horizontalSpacing * 1.45, kind);
-      case ShotSpecial.flower:
-        _burstAt(center, horizontalSpacing * 2.6, kind);
-      case ShotSpecial.lightning:
-        _lightningStrike();
-      case ShotSpecial.rainbow:
-      case ShotSpecial.none:
-        break;
-    }
-  }
-
-  void _burstAt(Offset c, double radius, ShotSpecial kind) {
-    final List<Bubble> victims = bubbles
-        .where(
-          (b) =>
-              _isOnScreen(b) &&
-              _physicalDistance(b.x - c.dx, b.y - c.dy) <= radius,
-        )
-        .toList();
-
-    boosterEffects.add(
-      BoosterEffect(kind: kind, x: c.dx, y: c.dy, radius: radius),
-    );
-    _popVictims(victims);
-  }
-
-  void _lightningStrike() {
-    final double a = _aspect;
-    final double reach = bubbleRadius * 1.1;
-    final List<Bubble> victims = [];
-
-    for (final Bubble b in bubbles) {
-      if (!_isOnScreen(b)) continue;
-      final Offset p = Offset(b.x, b.y / a);
-      for (int i = 0; i < _flightPath.length - 1; i++) {
-        final Offset s = Offset(_flightPath[i].dx, _flightPath[i].dy / a);
-        final Offset e = Offset(
-          _flightPath[i + 1].dx,
-          _flightPath[i + 1].dy / a,
-        );
-        if (_distToSegment(p, s, e) <= reach) {
-          victims.add(b);
-          break;
-        }
-      }
-    }
-
+    final victims = _specialVictims(kind, center, _flightPath, _flightHit);
+    final radius = _specialRadius(kind, center);
     boosterEffects.add(
       BoosterEffect(
-        kind: ShotSpecial.lightning,
-        x: _flightPath.first.dx,
-        y: _flightPath.first.dy,
-        path: List<Offset>.from(_flightPath),
+        kind: kind,
+        x: center.dx,
+        y: center.dy,
+        radius: radius,
+        path: kind == ShotSpecial.lightning
+            ? List<Offset>.from(_flightPath)
+            : const [],
       ),
     );
     _popVictims(victims);
+  }
+
+  /// The same selection is used by aim highlighting and shot resolution.
+  ({List<Bubble> victims, Offset center, double radius, List<Offset> path})
+  previewBooster({
+    required ShotSpecial special,
+    required double startX,
+    required double startY,
+    required double targetX,
+    required double targetY,
+  }) {
+    final plan = previewShot(
+      letter: ' ',
+      startX: startX,
+      startY: startY,
+      targetX: targetX,
+      targetY: targetY,
+      special: special,
+    );
+    final center = plan.landing ?? plan.path.last;
+    return (
+      victims: _specialVictims(special, center, plan.path, plan.hit),
+      center: center,
+      radius: _specialRadius(special, center),
+      path: plan.path,
+    );
+  }
+
+  double _specialRadius(ShotSpecial kind, Offset center) {
+    if (kind == ShotSpecial.bomb) return horizontalSpacing * 1.45;
+    if (kind != ShotSpecial.flower) return 0;
+    final visible = bubbles.where(_isOnScreen).toList();
+    if (visible.isEmpty) return horizontalSpacing * 2.6;
+    final distances =
+        visible
+            .map((b) => _physicalDistance(b.x - center.dx, b.y - center.dy))
+            .toList()
+          ..sort();
+    // At least 60% of currently visible bubbles, centered where the shot lands.
+    return max(
+      horizontalSpacing * 2.6,
+      distances[(visible.length * .60).ceil() - 1] + .00001,
+    );
+  }
+
+  List<Bubble> _specialVictims(
+    ShotSpecial kind,
+    Offset center,
+    List<Offset> path,
+    Bubble? hit,
+  ) {
+    final visible = bubbles.where(_isOnScreen).toList();
+    if (kind == ShotSpecial.none) return [];
+    if (kind == ShotSpecial.rainbow) {
+      // A color sweep, distinct from the local Bomb and straight Lightning.
+      // A miss at the ceiling clears nothing; the preview makes this explicit.
+      if (hit == null) return [];
+      return visible.where((b) => b.color == hit.color).toList();
+    }
+    if (kind == ShotSpecial.lightning) {
+      if (path.length < 2) return [];
+      final start = Offset(path.first.dx, path.first.dy / _aspect);
+      final end = Offset(path.last.dx, path.last.dy / _aspect);
+      return visible
+          .where(
+            (b) =>
+                _distToSegment(Offset(b.x, b.y / _aspect), start, end) <=
+                bubbleRadius * 1.1,
+          )
+          .toList();
+    }
+    final radius = _specialRadius(kind, center);
+    return visible
+        .where(
+          (b) => _physicalDistance(b.x - center.dx, b.y - center.dy) <= radius,
+        )
+        .toList();
   }
 
   double _distToSegment(Offset p, Offset a, Offset b) {
@@ -2080,7 +2112,7 @@ class GameEngine {
   void _updateBoosterEffects() {
     if (boosterEffects.isEmpty) return;
     for (final BoosterEffect e in List<BoosterEffect>.from(boosterEffects)) {
-      e.progress += e.kind == ShotSpecial.lightning ? 0.06 : 0.03;
+      e.progress += e.kind == ShotSpecial.lightning ? 0.025 : 0.03;
       if (e.progress >= 1) boosterEffects.remove(e);
     }
   }
