@@ -8,12 +8,12 @@ import 'game_engine.dart';
 import 'game_mode.dart';
 import 'bloom_visuals.dart';
 import 'booster_shop.dart' show showBoosterShop;
+import 'booster_purchase_dialog.dart';
 import 'test_ads_service.dart';
 import 'bubble.dart';
 import 'progress_service.dart';
 import 'word_dictionary.dart';
 import 'booster_service.dart';
-import 'gift_service.dart';
 import 'sound_service.dart';
 import 'booster_bar.dart';
 
@@ -69,8 +69,6 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
   bool _confettiPlayed = false;
   bool _winSaved = false;
 
-  /// How much of this level's score is already saved into the real coins.
-  int _creditedScore = 0;
   // Game-loop timing (frame-rate independent stepping).
   static const bool _kFixedTimestep = true; // false karo agar bubbles tez lagen
   static const int _kStepMicros = 16667; // 60 updates per second
@@ -230,17 +228,11 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
       _bonusSoundOn = true;
       debugPrint('Bonus shots started: $bonusLeftNow left');
       SoundService.instance.startLoop(Sfx.bonusPop);
-      Future<void>.delayed(const Duration(milliseconds: 420), () {
-        if (mounted) SoundService.instance.startLoop(Sfx.bonusCoin);
-      });
     }
     if (_bonusSoundOn && bonusLeftNow == 0) {
       _bonusSoundOn = false;
       Future<void>.delayed(const Duration(milliseconds: 250), () {
         SoundService.instance.stopLoop(Sfx.bonusPop);
-      });
-      Future<void>.delayed(const Duration(milliseconds: 700), () {
-        SoundService.instance.stopLoop(Sfx.bonusCoin);
       });
     }
     _prevBonusLeft = bonusLeftNow;
@@ -269,18 +261,6 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
         : _engine.goalProgress;
     if (wordProgress > _shownProgress) _shownProgress = wordProgress;
 
-    // COINS: every point scored is saved into the player's real coins right
-    // away (words + leftover-shot bonus), so closing the app never loses them.
-    final int nowScore = _engine.score;
-    if (nowScore > _creditedScore) {
-      // leftover shots flying out after the win: one coin tick per +points
-      if (_engine.goalReached) SoundService.instance.play(Sfx.coin);
-      GiftService.addCoins(nowScore - _creditedScore, mode: widget.mode);
-      _creditedScore = nowScore;
-    } else if (nowScore < _creditedScore) {
-      _creditedScore = nowScore; // score was reset (retry / next level)
-    }
-
     // Save the win the moment the last word is found, so leaving during
     // the bonus animation never loses it.
     if (_engine.goalReached && !_winSaved) {
@@ -295,6 +275,9 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
           stars,
           mode: widget.mode,
         ).then((_) => widget.onLevelComplete?.call(completed, stars));
+
+        // No coins for normal level completion. Coins come from gifts
+        // (every 20 levels) or the coin shop. Scores and stars are unchanged.
 
         // BOOSTERS: milestone rewards + unlocks for this level.
         _claimBoosterRewards(completed);
@@ -316,7 +299,6 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
   void dispose() {
     SoundService.instance.playMenuMusic(); // back to the calm loop
     SoundService.instance.stopLoop(Sfx.bonusPop);
-    SoundService.instance.stopLoop(Sfx.bonusCoin);
     _praiseTimer?.cancel();
     _gameLoopController.dispose();
     _confettiController.dispose();
@@ -405,11 +387,27 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
     });
   }
 
-  Future<void> _openBoosterShop(BoosterId id) async {
-    if (_engine.shooting || _engine.goalReached || _engine.gameOver) return;
+  /// Purchase popup: name, price, coin balance, Cancel / Buy. Coins are only
+  /// deducted when the player confirms. Not enough coins -> message plus an
+  /// option that opens the coin shop.
+  Future<void> _showBoosterPurchase(BoosterDef def) async {
+    if (_engine.shooting ||
+        _engine.goalReached ||
+        _engine.gameOver ||
+        _engine.levelComplete) {
+      return;
+    }
     setState(() => _isPaused = true);
     try {
-      await showBoosterShop(context, selected: id, mode: widget.mode);
+      final BoosterPurchaseResult result = await showBoosterPurchaseDialog(
+        context,
+        def,
+        mode: widget.mode,
+      );
+      if (!mounted) return;
+      if (result == BoosterPurchaseResult.openShop) {
+        await showBoosterShop(context, selected: def.id, mode: widget.mode);
+      }
     } finally {
       if (mounted) setState(() => _isPaused = false);
     }
@@ -420,7 +418,7 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
     SoundService.instance.click();
 
     if (!_boosters.isUnlocked(def) || _boosters.quantity(def.id) <= 0) {
-      _openBoosterShop(def.id);
+      _showBoosterPurchase(def);
       return;
     }
     if (_engine.gameOver || _engine.levelComplete || _engine.goalReached) {
@@ -747,16 +745,31 @@ class _WordBloomState extends State<WordBloom> with TickerProviderStateMixin {
                                 ),
                               ),
 
+                            if (widget.mode.isWordMode && !_engine.goalReached)
+                              Positioned.fill(
+                                child: IgnorePointer(
+                                  child: CustomPaint(
+                                    painter: _WordSlotPainter(
+                                      slots: _engine.wordGoalSlots,
+                                      radius: _engine.bubbleRadius,
+                                    ),
+                                  ),
+                                ),
+                              ),
+
                             // (header band removed: the background picture shows
                             // behind the top bar now)
 
-                            // TOP UI: pause | level + star progress | score
+                            // TOP UI: pause | level + star progress | gameplay score
                             Positioned(
                               key: const ValueKey('top_bar'),
                               top: 12,
                               left: 14,
                               right: 14,
                               child: _TopBar(
+                                clues: widget.mode.isWordMode
+                                    ? _engine.wordClueLabels
+                                    : const [],
                                 onPause: _openPauseMenu,
                                 progress: _shownProgress,
                                 collectedStars:

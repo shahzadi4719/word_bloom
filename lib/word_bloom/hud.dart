@@ -121,7 +121,7 @@ class _ToastPill extends StatelessWidget {
 }
 
 // ================================================================
-// TOP BAR: round pause button | level + star progress | score
+// TOP BAR: round pause button | level + star progress | gameplay score
 // The progress fill only ever moves forward (see _shownProgress).
 // ================================================================
 
@@ -131,16 +131,18 @@ class _TopBar extends StatelessWidget {
   final int collectedStars;
   final int? completedWords;
   final int totalWords;
+  final List<String> clues;
   const _TopBar({
     required this.onPause,
     required this.progress,
     this.collectedStars = 0,
     this.completedWords,
     this.totalWords = 1,
+    this.clues = const [],
   });
   @override
   Widget build(BuildContext context) => SizedBox(
-    height: 64,
+    height: clues.isEmpty ? 64 : 116,
     child: Row(
       children: [
         BloomBackButton(
@@ -151,7 +153,7 @@ class _TopBar extends StatelessWidget {
         const SizedBox(width: 16),
         Expanded(
           child: Container(
-            height: 60,
+            height: clues.isEmpty ? 60 : 112,
             padding: const EdgeInsets.symmetric(horizontal: 14),
             decoration: BoxDecoration(
               color: const Color(0x99FFE8F3),
@@ -172,6 +174,36 @@ class _TopBar extends StatelessWidget {
                         fontSize: 12,
                         color: Color(0xFFBB3482),
                       ),
+                    ),
+                  ),
+                if (clues.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 5),
+                    child: Wrap(
+                      alignment: WrapAlignment.center,
+                      spacing: 8,
+                      runSpacing: 4,
+                      children: [
+                        for (final clue in clues)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 9,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              clue,
+                              style: const TextStyle(
+                                fontFamily: 'Fredoka',
+                                fontSize: 16,
+                                color: Color(0xFFBB3482),
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                 Expanded(
@@ -252,42 +284,27 @@ class CoinIcon extends StatelessWidget {
 
   /// Draws the same coin on any canvas, centred at [c] with radius [r].
   static void paint(Canvas canvas, Offset c, double r, {double alpha = 1}) {
-    canvas.drawCircle(
-      c + Offset(0, r * 0.12),
-      r,
-      Paint()
-        ..color = const Color(0xFFFFA726).withValues(alpha: 0.35 * alpha)
-        ..maskFilter = MaskFilter.blur(BlurStyle.normal, r * 0.25),
-    );
-    canvas.drawCircle(
-      c,
-      r,
+    final path = Path();
+    for (var i = 0; i < 10; i++) {
+      final angle = -pi / 2 + i * pi / 5;
+      final radius = i.isEven ? r : r * .46;
+      final point = c + Offset(cos(angle) * radius, sin(angle) * radius);
+      if (i == 0) {
+        path.moveTo(point.dx, point.dy);
+      } else {
+        path.lineTo(point.dx, point.dy);
+      }
+    }
+    path.close();
+    canvas.drawPath(
+      path,
       Paint()
         ..shader = const LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [Color(0xFFFFE680), Color(0xFFFFA726)],
+          colors: [Color(0xFFFFA4D1), Color(0xFFC32A82)],
         ).createShader(Rect.fromCircle(center: c, radius: r))
         ..color = Colors.white.withValues(alpha: alpha),
-    );
-    canvas.drawCircle(
-      c,
-      r * 0.74,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = r * 0.16
-        ..color = const Color(0xFFD9820F).withValues(alpha: 0.85 * alpha),
-    );
-    canvas.drawArc(
-      Rect.fromCircle(center: c, radius: r * 0.5),
-      3.4,
-      1.3,
-      false,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round
-        ..strokeWidth = r * 0.14
-        ..color = Colors.white.withValues(alpha: 0.85 * alpha),
     );
   }
 }

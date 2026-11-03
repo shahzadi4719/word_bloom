@@ -31,7 +31,7 @@ class _BonusShotPainter extends CustomPainter {
         );
         _drawBubble(canvas, pos, r * (1.0 - 0.30 * t), s);
       } else {
-        // pop: ring + coin "+10" rising and fading
+        // pop: ring + score "+10" rising and fading (score only, no coins)
         final double t = (p - flightEnd) / (1 - flightEnd);
         final Offset pos = Offset(s.endX * size.width, s.endY * size.height);
 
@@ -67,15 +67,9 @@ class _BonusShotPainter extends CustomPainter {
           textDirection: TextDirection.ltr,
         )..layout();
 
-        // coin + number, rising together
-        final double coinR = r * 0.42;
-        final double gap = r * 0.12;
-        final double totalW = coinR * 2 + gap + tp.width;
-        final double left = pos.dx - totalW / 2;
+        // score number only, rising and fading
         final double cy = pos.dy - t * r * 1.4;
-
-        CoinIcon.paint(canvas, Offset(left + coinR, cy), coinR, alpha: fade);
-        tp.paint(canvas, Offset(left + coinR * 2 + gap, cy - tp.height / 2));
+        tp.paint(canvas, Offset(pos.dx - tp.width / 2, cy - tp.height / 2));
       }
     }
   }
@@ -1065,38 +1059,6 @@ class _BoosterPreviewPainter extends CustomPainter {
           ..color = Colors.white,
       );
     }
-    final label = switch (special) {
-      ShotSpecial.bomb => 'Bomb',
-      ShotSpecial.flower => 'Blast',
-      ShotSpecial.rainbow => 'Rainbow',
-      ShotSpecial.lightning => 'Lightning',
-      ShotSpecial.none => '',
-    };
-    final tp = TextPainter(
-      text: TextSpan(
-        text: '$label · ${preview.victims.length} bubbles',
-        style: const TextStyle(
-          fontFamily: 'Fredoka',
-          fontSize: 15,
-          color: Colors.white,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    final x = (center.dx - tp.width / 2)
-        .clamp(12.0, max(12.0, size.width - tp.width - 12))
-        .toDouble();
-    final y = (center.dy + size.width * .12)
-        .clamp(size.height * .18, size.height * .73)
-        .toDouble();
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(x - 8, y - 6, tp.width + 16, tp.height + 12),
-        const Radius.circular(14),
-      ),
-      Paint()..color = const Color(0xFFC52F83),
-    );
-    tp.paint(canvas, Offset(x, y));
     canvas.restore();
   }
 
@@ -1140,4 +1102,45 @@ class _LiveLightningPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _LiveLightningPainter oldDelegate) => true;
+}
+
+class _WordSlotPainter extends CustomPainter {
+  final List<Offset> slots;
+  final double radius;
+  const _WordSlotPainter({required this.slots, required this.radius});
+  @override
+  void paint(Canvas canvas, Size size) {
+    final r = radius * size.width;
+    for (final slot in slots) {
+      final c = Offset(slot.dx * size.width, slot.dy * size.height);
+      canvas.drawCircle(c, r, Paint()..color = const Color(0x33FFFFFF));
+      for (var i = 0; i < 12; i++) {
+        canvas.drawArc(
+          Rect.fromCircle(center: c, radius: r),
+          i * pi / 6,
+          pi / 10,
+          false,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2.5
+            ..color = const Color(0xFFCA3E91),
+        );
+      }
+      final t = TextPainter(
+        text: const TextSpan(
+          text: '?',
+          style: TextStyle(
+            fontFamily: 'Fredoka',
+            fontSize: 22,
+            color: Color(0xFFCA3E91),
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      t.paint(canvas, Offset(c.dx - t.width / 2, c.dy - t.height / 2));
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _WordSlotPainter oldDelegate) => true;
 }

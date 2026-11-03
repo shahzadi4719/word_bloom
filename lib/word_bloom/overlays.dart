@@ -300,7 +300,7 @@ class _WinScorePill extends StatelessWidget {
       curve: Curves.easeOutCubic,
       builder: (context, v, _) {
         return Container(
-          padding: const EdgeInsets.fromLTRB(8, 7, 20, 7),
+          padding: const EdgeInsets.fromLTRB(22, 7, 22, 7),
           decoration: BoxDecoration(
             color: Colors.white.withValues(alpha: 0.96),
             borderRadius: BorderRadius.circular(30),
@@ -316,8 +316,16 @@ class _WinScorePill extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const CoinIcon(size: 34),
-              const SizedBox(width: 10),
+              const Text(
+                'SCORE',
+                style: TextStyle(
+                  fontFamily: 'Fredoka',
+                  fontSize: 16,
+                  letterSpacing: 1.2,
+                  color: Color(0xFFBB3482),
+                ),
+              ),
+              const SizedBox(width: 12),
               Text(
                 '${v.round()}',
                 style: const TextStyle(

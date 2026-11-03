@@ -149,11 +149,11 @@ class BoosterGrant {
 // ================================================================
 
 int boosterCoinPrice(BoosterId id) => switch (id) {
-  BoosterId.bloomSwap => 100,
-  BoosterId.bloomBomb => 250,
-  BoosterId.rainbowBloom => 350,
-  BoosterId.bloomLightning => 450,
-  BoosterId.flowerBlast => 600,
+  BoosterId.bloomSwap => 300,
+  BoosterId.bloomBomb => 500,
+  BoosterId.rainbowBloom => 800,
+  BoosterId.bloomLightning => 1200,
+  BoosterId.flowerBlast => 1500,
 };
 
 class BoosterService extends ChangeNotifier {
@@ -247,13 +247,16 @@ class BoosterService extends ChangeNotifier {
     await p.setInt('booster_qty_${id.name}', quantity(id));
   }
 
-  /// Purchased boosters remain unlocked, including after their quantity reaches zero.
-  Future<void> addPurchased(BoosterId id) async {
+  /// Adds [amount] boosters (coin purchase, gift or rewarded ad).
+  /// Owned boosters remain unlocked, including after their quantity reaches
+  /// zero. Either everything is saved or nothing changes.
+  Future<void> addPurchased(BoosterId id, {int amount = 1}) async {
+    if (amount <= 0) return;
     final p = await SharedPreferences.getInstance();
     final before = quantity(id);
     final wasPurchased = _purchased.contains(id);
     try {
-      if (!await p.setInt('booster_qty_${id.name}', before + 1)) {
+      if (!await p.setInt('booster_qty_${id.name}', before + amount)) {
         throw StateError('Could not save booster');
       }
       if (!await p.setBool('booster_purchased_${id.name}', true)) {
@@ -264,7 +267,7 @@ class BoosterService extends ChangeNotifier {
       await p.setBool('booster_purchased_${id.name}', wasPurchased);
       rethrow;
     }
-    _qty[id] = before + 1;
+    _qty[id] = before + amount;
     _purchased.add(id);
     notifyListeners();
   }

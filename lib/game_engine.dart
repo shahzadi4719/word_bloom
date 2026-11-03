@@ -87,37 +87,14 @@ class GameEngine {
   Color colorForToken(String token) => _colorForLetter(token);
 
   // ============================================================
-  // DICTIONARY (any real word pops, but only within the level's
-  // allowed length range - see lengthRangeFor in levels.dart)
+  // WORD GOALS (complete only the named missing-letter clues)
   // ============================================================
   static const int minWordLength = 3;
   static const int maxWordLength = 8;
 
-  Set<String> _dictionary = {};
-  Set<String> _prefixes = {};
-
-  void setDictionary(Set<String> words) {
-    _dictionary = words;
-    final Set<String> prefixes = {};
-    _prefixes = prefixes;
-    _buildPrefixes(words.iterator, prefixes);
-  }
-
-  /// Builds the prefix table in small slices so the game never freezes
-  /// while the (big) dictionary is being indexed.
-  Future<void> _buildPrefixes(Iterator<String> it, Set<String> target) async {
-    int n = 0;
-    while (it.moveNext()) {
-      final String w = it.current;
-      for (int i = 1; i <= w.length; i++) {
-        target.add(w.substring(0, i));
-      }
-      if (++n % 1500 == 0) {
-        await Future<void>.delayed(Duration.zero);
-        if (!identical(_prefixes, target)) return; // a newer dictionary won
-      }
-    }
-  }
+  // Retained for existing startup callers. Word goals come from the level,
+  // never from a free dictionary scan.
+  void setDictionary(Set<String> words) {}
 
   // ============================================================
   // BOARD
@@ -171,6 +148,7 @@ class GameEngine {
   // ---- boosters ----
   final List<BoosterEffect> boosterEffects = [];
   ShotSpecial _flightSpecial = ShotSpecial.none;
+  bool _blastClearedBoard = false;
 
   /// The special currently flying (none for normal shots).
   ShotSpecial get flyingSpecial => shooting ? _flightSpecial : ShotSpecial.none;
@@ -227,11 +205,6 @@ class GameEngine {
   String? toastMessage;
   double _toastTimer = 0;
 
-  void _showToast(String message) {
-    toastMessage = message;
-    _toastTimer = 1.8;
-  }
-
   /// e.g. "4 letters" or "3–4 letters" for the current level.
   String get lengthRuleText {
     final List<int> r = lengthRangeFor(currentLevel?.number ?? 1);
@@ -241,9 +214,10 @@ class GameEngine {
   /// All of the level's words have been found (board is clearing).
   bool get goalReached =>
       currentLevel != null &&
-      (isWordMode
-          ? completedWords.length >= currentLevel!.words.length
-          : _initialBoardCount > 0 && bubbles.isEmpty);
+      (_blastClearedBoard ||
+          (isWordMode
+              ? completedWords.length >= currentLevel!.words.length
+              : _initialBoardCount > 0 && bubbles.isEmpty));
 
   /// Frames each falling bubble still waits before it starts to drop
   /// (used for the cascade when a level is won).
@@ -271,35 +245,6 @@ class GameEngine {
 
   /// Wildcard: can be any letter.
   final Set<int> wildIds = {};
-
-  static const List<String> _alphabet = [
-    'A',
-    'B',
-    'C',
-    'D',
-    'E',
-    'F',
-    'G',
-    'H',
-    'I',
-    'J',
-    'K',
-    'L',
-    'M',
-    'N',
-    'O',
-    'P',
-    'Q',
-    'R',
-    'S',
-    'T',
-    'U',
-    'V',
-    'W',
-    'X',
-    'Y',
-    'Z',
-  ];
 
   // ---- per-level rules --------------------------------------------------
   /// 0 = no timer. Otherwise seconds for the whole level.
@@ -363,7 +308,10 @@ class GameEngine {
     bubbleRadius = (diameterPx / 2) / size.width;
     horizontalSpacing = bubbleRadius * 2;
     // Keep the complete first bubble below the word-goal strip on every screen.
-    boardTopY = (headerHeightPx + diameterPx / 2 + 4) / size.height - 0.03;
+    boardTopY =
+        ((isWordMode ? 148.0 : headerHeightPx) + diameterPx / 2 + 4) /
+            size.height -
+        0.03;
   }
 
   double _physicalDistance(double dx, double dyHeightFraction) {
@@ -377,6 +325,78 @@ class GameEngine {
   int _shotQueueIndex = 0;
 
   final List<String> completedWords = [];
+  final Map<String, List<int>> _wordClueIds = {};
+  final Map<String, Offset> _wordSlots = {};
+  List<String> get wordClueLabels => currentLevel == null
+      ? []
+      : [
+          for (final word in currentLevel!.words)
+            completedWords.contains(word)
+                ? '✓ $word'
+                : '${word.substring(0, word.length - 1)}_',
+        ];
+  List<Offset> get wordGoalSlots => [
+    for (final entry in _wordSlots.entries)
+      if (!completedWords.contains(entry.key)) entry.value,
+  ];
+
+  void _createWordClues() {
+    _wordClueIds.clear();
+    _wordSlots.clear();
+    final words = currentLevel!.words
+        .where((w) => !completedWords.contains(w))
+        .toList();
+    for (var i = 0; i < words.length; i++) {
+      final word = words[i];
+      final base = words.length == 1
+          ? .5
+          : words.length == 2
+          ? [.28, .72][i]
+          : [.18, .5, .82][i];
+      final ids = <int>[];
+      for (var row = 0; row < word.length - 1; row++) {
+        final x = base + (row.isEven ? -1 : 1) * horizontalSpacing / 4;
+        final b = Bubble(
+          x: x,
+          y: _topRowY + row * verticalSpacing,
+          letter: word[row],
+          color: _colorForLetter(word[row]),
+          radius: bubbleRadius,
+        );
+        bubbles.add(b);
+        ids.add(b.id);
+      }
+      final endRow = word.length - 1;
+      _wordClueIds[word] = ids;
+      _wordSlots[word] = Offset(
+        base + (endRow.isEven ? -1 : 1) * horizontalSpacing / 4,
+        _topRowY + endRow * verticalSpacing,
+      );
+    }
+  }
+
+  void _restoreDamagedWordClues() {
+    if (!isWordMode || goalReached) return;
+    final existing = bubbles.map((b) => b.id).toSet();
+    if (_wordClueIds.entries.any(
+      (e) =>
+          !completedWords.contains(e.key) &&
+          e.value.any((id) => !existing.contains(id)),
+    )) {
+      // Power-ups may remove clues. Re-deal unfinished clues rather than
+      // leaving an impossible word or counting a word the player did not make.
+      bubbles.clear();
+      _scrollOffset = 0;
+      _scrollRemaining = 0;
+      lockHits.clear();
+      stoneIds.clear();
+      iceIds.clear();
+      hiddenIds.clear();
+      bombIds.clear();
+      wildIds.clear();
+      _createWordClues();
+    }
+  }
 
   /// Levels at or below this get a bigger board (more bubbles).
   static const int expandedBoardLevelCap = 20;
@@ -438,6 +458,7 @@ class GameEngine {
     _lastHitBubble = null;
     flyingPops.clear();
     boosterEffects.clear();
+    _blastClearedBoard = false;
     _flightSpecial = ShotSpecial.none;
     collectedLetters.clear();
     fallingBubbles.clear();
@@ -474,8 +495,8 @@ class GameEngine {
     bonusShotsLeft = 0;
     bonusShots.clear();
 
-    if (levelNumber == 1 && isWordMode) {
-      _createLevelOne();
+    if (isWordMode) {
+      _createWordClues();
     } else {
       _createPatternLevel(currentLevel!);
     }
@@ -488,7 +509,7 @@ class GameEngine {
         starBubbleIds.add(candidates[index].id);
       }
     }
-    if (!isWordMode) {
+    if (currentLevel != null) {
       _shotQueue = _generateShotQueue(max(30, currentLevel!.maxShots * 2));
     }
   }
@@ -496,18 +517,6 @@ class GameEngine {
   // ============================================================
   // BOARDS
   // ============================================================
-
-  void _createLevelOne() {
-    const List<List<String>> board = [
-      ['P', 'B', 'I', 'N', 'U'],
-      ['E', 'R', 'L', 'M', 'S', 'H'],
-      ['W', 'K', 'N', 'U'],
-    ];
-
-    for (int row = 0; row < board.length; row++) {
-      _addRow(board[row], row);
-    }
-  }
 
   // ------------------------------------------------------------
   // PATTERN BOARDS (tall - they scroll down as you clear them)
@@ -776,9 +785,11 @@ class GameEngine {
     _poolTier = _poolTierFor(n);
     swapsLeft = _swapLimitFor(n);
     descendEvery = _isBreather(n) ? 0 : _descendEveryFor(n);
+    if (isWordMode) descendEvery = 0;
     _shotsSinceDescend = 0;
 
     timeLimit = _isBreather(n) ? 0 : _timeLimitFor(n, wordCount);
+    if (isWordMode) timeLimit = 0;
     timeLeft = timeLimit;
     timeUp = false;
     _lastTick = null;
@@ -890,34 +901,6 @@ class GameEngine {
     );
   }
 
-  void _addRow(List<String> letters, int row) {
-    if (letters.isEmpty) return;
-
-    const int gridCols = 6;
-    final double h = horizontalSpacing;
-
-    // One shared hex grid for every row.
-    final double gridLeft = 0.5 - ((gridCols - 1) * h + h / 2) / 2;
-    final int colOffset = ((gridCols - letters.length) / 2).floor();
-
-    final double y = _topRowY + row * verticalSpacing;
-    final double rowShift = row.isOdd ? h / 2 : 0;
-
-    for (int i = 0; i < letters.length; i++) {
-      final double x = gridLeft + (colOffset + i) * h + rowShift;
-
-      bubbles.add(
-        Bubble(
-          x: x,
-          y: y,
-          letter: letters[i],
-          color: _colorForLetter(letters[i]),
-          radius: bubbleRadius,
-        ),
-      );
-    }
-  }
-
   Color _colorForLetter(String letter) {
     if (!isWordMode) {
       const palette = [
@@ -950,6 +933,17 @@ class GameEngine {
   ];
 
   List<String> _generateShotQueue(int minLength) {
+    if (isWordMode && currentLevel != null) {
+      final needed = currentLevel!.words
+          .where((w) => !completedWords.contains(w))
+          .map((w) => w[w.length - 1])
+          .toList();
+      if (needed.isNotEmpty)
+        return List.generate(
+          max(minLength, 30),
+          (i) => needed[i % needed.length],
+        );
+    }
     final String pool = isWordMode
         ? _pools[_poolTier.clamp(0, _pools.length - 1)]
         : _activeMatchSymbols().join();
@@ -975,6 +969,7 @@ class GameEngine {
 
     _ensureShotQueueHas(_shotQueueIndex);
 
+    if (isWordMode) _refreshWordSymbol(_shotQueueIndex);
     if (!isWordMode) _refreshQueuedSymbol(_shotQueueIndex);
     final String letter = _shotQueue[_shotQueueIndex];
     _shotQueueIndex++;
@@ -992,6 +987,7 @@ class GameEngine {
 
     final int index = _shotQueueIndex + lookahead;
     _ensureShotQueueHas(index);
+    if (isWordMode) _refreshWordSymbol(index);
     if (!isWordMode) _refreshQueuedSymbol(index);
     return _shotQueue[index];
   }
@@ -1388,85 +1384,25 @@ class GameEngine {
       _checkForMatch(shot);
       return;
     }
-    if (currentLevel == null || _dictionary.isEmpty) {
-      _checkGameOver();
-      return;
-    }
-
-    // CHANGED: only words whose length is inside this level's range.
-    final List<int> lenRange = lengthRangeFor(currentLevel!.number);
-    final int minLen = lenRange[0];
-    final int maxLen = lenRange[1];
-
-    List<Bubble> best = [];
-    String bestWord = '';
-    String? tooShortWord; // a real word, but too short for this level
-    String? repeatedWord; // a real word that was already found
-    final List<Bubble> path = [];
-    final Set<int> used = {};
-
-    void dfs(Bubble current, String text) {
-      // stones, locks, ice and hidden letters can't be used yet
-      if (_blocked(current)) return;
-
-      path.add(current);
-      used.add(current.id);
-
-      final List<String> options = wildIds.contains(current.id)
-          ? _alphabet
-          : [current.letter.toUpperCase()];
-
-      for (final String ch in options) {
-        final String next = text + ch;
-
-        // Stop early if no dictionary word starts with this text.
-        if (!_prefixes.contains(next)) continue;
-
-        if (next.length >= minLen &&
-            next.length <= maxLen &&
-            _dictionary.contains(next) &&
-            !completedWords.contains(next) && // every word counts once
-            path.any((b) => b.id == shot.id) &&
-            next.length > bestWord.length) {
-          bestWord = next;
-          best = List<Bubble>.from(path);
-        }
-
-        // real words that don't count: tell the player why
-        if (_dictionary.contains(next) &&
-            next.length >= minWordLength &&
-            path.any((b) => b.id == shot.id)) {
-          if (next.length < minLen) {
-            if (tooShortWord == null || next.length > tooShortWord!.length) {
-              tooShortWord = next;
-            }
-          }
-          if (next.length >= minLen && completedWords.contains(next)) {
-            repeatedWord ??= next;
-          }
-        }
-
-        if (next.length < maxLen) {
-          for (final Bubble n in _getNeighbors(current)) {
-            if (!used.contains(n.id) && _isOnScreen(n)) dfs(n, next);
-          }
-        }
+    if (currentLevel == null) return;
+    for (final entry in _wordClueIds.entries) {
+      final word = entry.key;
+      if (completedWords.contains(word) || shot.letter != word[word.length - 1])
+        continue;
+      final slot = _wordSlots[word]!;
+      if (_physicalDistance(shot.x - slot.dx, shot.y - slot.dy) >
+          horizontalSpacing * .35)
+        continue;
+      final clue = <Bubble>[];
+      for (final id in entry.value) {
+        final found = bubbles.where((b) => b.id == id).toList();
+        if (found.isNotEmpty) clue.add(found.single);
       }
-
-      path.removeLast();
-      used.remove(current.id);
-    }
-
-    for (final Bubble b in List<Bubble>.from(bubbles)) {
-      if (_isOnScreen(b)) dfs(b, '');
-    }
-
-    if (best.isNotEmpty) {
-      _popWord(bestWord, best);
-    } else if (tooShortWord != null) {
-      _showToast('$tooShortWord is too short — use $lengthRuleText');
-    } else if (repeatedWord != null) {
-      _showToast('$repeatedWord is already found');
+      if (clue.length != word.length - 1 ||
+          !_getNeighbors(clue.last).any((b) => b.id == shot.id))
+        continue;
+      _popWord(word, [...clue, shot]);
+      return;
     }
     _checkGameOver();
   }
@@ -1498,6 +1434,15 @@ class GameEngine {
     final pool = matchSymbolsFor(currentLevel?.number ?? 1);
     final active = pool.where(present.contains).toList();
     return active.isEmpty ? pool : active;
+  }
+
+  void _refreshWordSymbol(int index) {
+    final remaining = currentLevel!.words
+        .where((w) => !completedWords.contains(w))
+        .map((w) => w[w.length - 1])
+        .toList();
+    if (remaining.isNotEmpty && !remaining.contains(_shotQueue[index]))
+      _shotQueue[index] = remaining[index % remaining.length];
   }
 
   void _refreshQueuedSymbol(int index) {
@@ -1550,7 +1495,7 @@ class GameEngine {
   }
 
   void _finishMatchTurn() {
-    if (isWordMode) return;
+    if (isWordMode && !_blastClearedBoard) return;
     if (goalReached && !_winPending && !levelComplete) {
       _cascadeBoard();
     } else {
@@ -1587,6 +1532,7 @@ class GameEngine {
     _breakStonesNextTo(matched);
     _dropFloatingBubbles();
     _requestScroll();
+    _restoreDamagedWordClues();
 
     // Last word found: everything left on the board falls away.
     if (goalReached) _cascadeBoard();
@@ -1865,6 +1811,7 @@ class GameEngine {
       b.y * _screenSize.height + b.radius * _screenSize.width > 0;
 
   void _requestScroll() {
+    if (isWordMode) return;
     if (bubbles.isEmpty || _scrollOffset >= -0.001) return;
 
     double lowest = 0;
@@ -1958,7 +1905,7 @@ class GameEngine {
     if (mode == GameMode.colorMatch) return collectedStars.clamp(1, 3);
     final level = currentLevel;
     if (level == null || level.maxShots == 0) return 3;
-    final required = isWordMode ? level.totalRequiredLetters : 0;
+    final required = isWordMode ? level.wordCount : 0;
     final slack = max(1, level.maxShots - required);
     final ratio = max(0, level.maxShots - shotsUsed) / slack;
     if (ratio >= .5) return 3;
@@ -1992,6 +1939,8 @@ class GameEngine {
     _flightSpecial = ShotSpecial.none;
 
     final victims = _specialVictims(kind, center, _flightPath, _flightHit);
+    if (kind == ShotSpecial.flower && victims.isNotEmpty)
+      _blastClearedBoard = true;
     final radius = _specialRadius(kind, center);
     boosterEffects.add(
       BoosterEffect(
@@ -2034,19 +1983,24 @@ class GameEngine {
   }
 
   double _specialRadius(ShotSpecial kind, Offset center) {
-    if (kind == ShotSpecial.bomb) return horizontalSpacing * 1.45;
-    if (kind != ShotSpecial.flower) return 0;
+    if (kind == ShotSpecial.flower ||
+        kind == ShotSpecial.lightning ||
+        kind == ShotSpecial.none)
+      return 0;
+    // Expand around the landing point, regardless of bubble color or letter.
+    final minimum = kind == ShotSpecial.rainbow ? 15 : 9;
+    final baseRadius =
+        horizontalSpacing * (kind == ShotSpecial.rainbow ? 3.0 : 2.25);
     final visible = bubbles.where(_isOnScreen).toList();
-    if (visible.isEmpty) return horizontalSpacing * 2.6;
+    if (visible.isEmpty) return baseRadius;
     final distances =
         visible
             .map((b) => _physicalDistance(b.x - center.dx, b.y - center.dy))
             .toList()
           ..sort();
-    // At least 60% of currently visible bubbles, centered where the shot lands.
     return max(
-      horizontalSpacing * 2.6,
-      distances[(visible.length * .60).ceil() - 1] + .00001,
+      baseRadius,
+      distances[min(minimum, distances.length) - 1] + .00001,
     );
   }
 
@@ -2058,12 +2012,7 @@ class GameEngine {
   ) {
     final visible = bubbles.where(_isOnScreen).toList();
     if (kind == ShotSpecial.none) return [];
-    if (kind == ShotSpecial.rainbow) {
-      // A color sweep, distinct from the local Bomb and straight Lightning.
-      // A miss at the ceiling clears nothing; the preview makes this explicit.
-      if (hit == null) return [];
-      return visible.where((b) => b.color == hit.color).toList();
-    }
+    if (kind == ShotSpecial.flower) return List<Bubble>.from(bubbles);
     if (kind == ShotSpecial.lightning) {
       if (path.length < 2) return [];
       final start = Offset(path.first.dx, path.first.dy / _aspect);
@@ -2106,6 +2055,7 @@ class GameEngine {
     }
     _dropFloatingBubbles();
     _requestScroll();
+    _restoreDamagedWordClues();
     _finishMatchTurn();
   }
 

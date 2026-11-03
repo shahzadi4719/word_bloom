@@ -60,7 +60,7 @@ class _TutorialOverlayState extends State<_TutorialOverlay>
                   ),
                   SizedBox(height: 3),
                   Text(
-                    'Connect the letters to make a word',
+                    'Complete CA_ : shoot T into the marked spot.',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 12,

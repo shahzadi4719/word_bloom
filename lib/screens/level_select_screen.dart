@@ -71,9 +71,7 @@ class _LevelSelectScreenState extends State<LevelSelectScreen>
   Map<int, int> _levelStars = {};
   bool _progressLoaded = false;
 
-  // Coins are now loaded from GiftService (see _loadProgress).
-  // If you already have your own coins source, change
-  // GiftService.getCoins(mode: widget.mode) / addCoins() inside gift_service.dart.
+  // Persistent coin balance loaded from GiftService.
   int _coins = 0;
 
   // Gift boxes that the player has already opened.
@@ -388,9 +386,13 @@ class _LevelSelectScreenState extends State<LevelSelectScreen>
                         const SizedBox(width: 10),
                         Expanded(
                           child: _StatPill(
-                            icon: Icons.monetization_on_rounded,
+                            icon: Icons.circle,
                             iconColor: const Color(0xFFFFB52E),
-                            leading: const CoinIcon(size: 30),
+                            leading: const Icon(
+                              Icons.monetization_on_rounded,
+                              size: 30,
+                              color: Color(0xFFFFB52E),
+                            ),
                             value: '$_coins',
                             showPlus: true,
                             onPlusTap: () {

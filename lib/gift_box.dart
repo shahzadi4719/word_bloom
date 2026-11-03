@@ -157,7 +157,12 @@ class GiftBoxPainter extends CustomPainter {
     // ribbon + shine on the body
     canvas.save();
     canvas.clipRRect(body);
-    final Rect rib = Rect.fromLTWH(w * 0.5 - w * 0.07, h * 0.46, w * 0.14, h * 0.48);
+    final Rect rib = Rect.fromLTWH(
+      w * 0.5 - w * 0.07,
+      h * 0.46,
+      w * 0.14,
+      h * 0.48,
+    );
     canvas.drawRect(rib, Paint()..color = ribbon);
     canvas.drawRect(
       rib,
@@ -203,7 +208,10 @@ class GiftBoxPainter extends CustomPainter {
       width: w * 0.86,
       height: h * 0.22,
     );
-    final RRect lid = RRect.fromRectAndRadius(lidRect, Radius.circular(w * 0.07));
+    final RRect lid = RRect.fromRectAndRadius(
+      lidRect,
+      Radius.circular(w * 0.07),
+    );
 
     canvas.drawRRect(
       lid,
@@ -536,7 +544,10 @@ class GiftPathLayer extends StatelessWidget {
 
             Offset pt(int idx) => Offset(
               _xFor(idx) * w,
-              topPad + (totalLevels - 1 - idx) * nodeSpacing - offset + nodeCenterY,
+              topPad +
+                  (totalLevels - 1 - idx) * nodeSpacing -
+                  offset +
+                  nodeCenterY,
             );
 
             final int kMin =
@@ -559,8 +570,12 @@ class GiftPathLayer extends StatelessWidget {
               final double lowT = _tangentDx(i);
               final double topT = _tangentDx(i + 1);
               final double dx = (p3.dx - p0.dx).abs();
-              final Offset tLow = lowT != 0 ? Offset(lowT, 0) : const Offset(0, -1);
-              final Offset tTop = topT != 0 ? Offset(topT, 0) : const Offset(0, -1);
+              final Offset tLow = lowT != 0
+                  ? Offset(lowT, 0)
+                  : const Offset(0, -1);
+              final Offset tTop = topT != 0
+                  ? Offset(topT, 0)
+                  : const Offset(0, -1);
               final double lenLow = lowT != 0 ? dx : nodeSpacing * 0.62;
               final double lenTop = topT != 0 ? dx : nodeSpacing * 0.62;
               final Offset c1 = p0 + tLow * lenLow;
@@ -703,14 +718,15 @@ class _GiftOpenOverlayState extends State<_GiftOpenOverlay>
       ),
     );
 
-    _seq = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 5200),
-    )..animateTo(
-        _waitAt,
-        duration: const Duration(milliseconds: 832),
-        curve: Curves.linear,
-      );
+    _seq =
+        AnimationController(
+          vsync: this,
+          duration: const Duration(milliseconds: 5200),
+        )..animateTo(
+          _waitAt,
+          duration: const Duration(milliseconds: 832),
+          curve: Curves.linear,
+        );
 
     _fly = AnimationController(
       vsync: this,
@@ -767,12 +783,11 @@ class _GiftOpenOverlayState extends State<_GiftOpenOverlay>
     if (t is RenderBox && t.attached) {
       end = me.globalToLocal(t.localToGlobal(t.size.center(Offset.zero)));
     }
-    end ??= Offset(
-      me.size.width - 54,
-      MediaQuery.of(context).padding.top + 34,
-    );
+    end ??= Offset(me.size.width - 54, MediaQuery.of(context).padding.top + 34);
 
-    _flyStart = me.globalToLocal(coin.localToGlobal(coin.size.center(Offset.zero)));
+    _flyStart = me.globalToLocal(
+      coin.localToGlobal(coin.size.center(Offset.zero)),
+    );
     _flyEnd = end;
     SoundService.instance.play(Sfx.collect);
     setState(() {});
@@ -920,10 +935,7 @@ class _GiftOpenOverlayState extends State<_GiftOpenOverlay>
                             scale: titleT.clamp(0.0, 1.4),
                             child: const FittedBox(
                               fit: BoxFit.scaleDown,
-                              child: _OutlinedText(
-                                text: 'SURPRISE!',
-                                size: 40,
-                              ),
+                              child: _OutlinedText(text: 'SURPRISE!', size: 40),
                             ),
                           ),
                         ),
@@ -979,7 +991,10 @@ class _GiftOpenOverlayState extends State<_GiftOpenOverlay>
                                   right: 0,
                                   child: Opacity(
                                     opacity:
-                                        (drop * (0.6 + 0.4 * sin(loop * 2 * pi * 2)))
+                                        (drop *
+                                                (0.6 +
+                                                    0.4 *
+                                                        sin(loop * 2 * pi * 2)))
                                             .clamp(0.0, 1.0),
                                     child: const Center(
                                       child: Text(
@@ -1317,50 +1332,26 @@ class _CoinPainter extends CustomPainter {
     final Offset c = size.center(Offset.zero);
     final double r = min(size.width, size.height) / 2;
 
-    canvas.drawCircle(
-      c.translate(0, r * 0.08),
-      r * 0.96,
-      Paint()
-        ..color = const Color(0x33B56B00)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
-    );
-    canvas.drawCircle(
-      c,
-      r * 0.94,
-      Paint()
-        ..shader = const RadialGradient(
-          center: Alignment(-0.4, -0.5),
-          colors: [Color(0xFFFFF0A8), Color(0xFFFFC43D), Color(0xFFE09A12)],
-          stops: [0.0, 0.5, 1.0],
-        ).createShader(Rect.fromCircle(center: c, radius: r)),
-    );
-    canvas.drawCircle(
-      c,
-      r * 0.94,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = r * 0.10
-        ..color = const Color(0xFFD98A00),
-    );
-    canvas.drawCircle(
-      c,
-      r * 0.66,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = r * 0.06
-        ..color = const Color(0xFFFFE08A),
-    );
+    final path = Path();
+    for (var i = 0; i < 10; i++) {
+      final a = -pi / 2 + i * pi / 5;
+      final rr = i.isEven ? r : r * .46;
+      final x = c.dx + cos(a) * rr, y = c.dy + sin(a) * rr;
+      if (i == 0) {
+        path.moveTo(x, y);
+      } else {
+        path.lineTo(x, y);
+      }
+    }
+    path.close();
     canvas.drawPath(
-      _sparklePath(c, r * 0.42),
-      Paint()..color = Colors.white.withValues(alpha: 0.95),
-    );
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: c.translate(-r * 0.4, -r * 0.5),
-        width: r * 0.4,
-        height: r * 0.2,
-      ),
-      Paint()..color = Colors.white.withValues(alpha: 0.6),
+      path,
+      Paint()
+        ..shader = const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFFFFA4D1), Color(0xFFC32A82)],
+        ).createShader(Rect.fromCircle(center: c, radius: r)),
     );
   }
 

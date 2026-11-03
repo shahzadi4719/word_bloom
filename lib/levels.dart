@@ -150,30 +150,20 @@ String worldNameFor(int n) => worldNames[worldFor(n) - 1];
 // HOW MANY WORDS PER LEVEL
 // ============================================================
 
-int wordCountForLevel(int n) {
-  if (n <= 5) return 1;
-  if (n <= 15) return 2;
-  if (n <= 60) return 3;
-  if (n <= 200) return 4;
-  if (n <= 400) return 5;
-  if (n <= 900) return 6;
-  if (n <= 1600) return 7;
-  return 8;
-}
+int wordCountForLevel(int n) => n <= 5
+    ? 1
+    : (n <= 20 || n % 5 == 0)
+    ? 2
+    : 3;
 
 // ============================================================
 // WORD LENGTH PROGRESSION
 // ============================================================
 
 List<int> _lengthRange(int n) {
-  if (n <= 30) return [3, 3];
+  if (n <= 20 || n % 5 == 0) return [3, 3];
   if (n <= 60) return [3, 4];
-  if (n <= 200) return [4, 4];
-  if (n <= 400) return [4, 5];
-  if (n <= 700) return [5, 5];
-  if (n <= 1100) return [5, 6];
-
-  return [6, 7];
+  return [3, 5];
 }
 
 /// Public: min/max word length for a level.
@@ -352,19 +342,8 @@ List<String> _createHints(List<String> words, int n) {
 // SHOTS
 // ============================================================
 
-double _shotRatio(int n) => 2.2 + (n.clamp(1, 2000) / 2000) * 0.8;
-
-int _calculateMaxShots(List<String> words, int n, Random rnd) {
-  final int required = words.fold<int>(0, (t, w) => t + w.length);
-
-  final int byLetters = (required * _shotRatio(n)).round();
-  final int floorShots = 24 + min(n, 2000) ~/ 60;
-
-  // Tiny random variation between neighbouring levels.
-  final int wiggle = n <= 5 ? 0 : rnd.nextInt(3);
-
-  return max(max(byLetters, floorShots), required + 12) + wiggle;
-}
+int _calculateMaxShots(List<String> words, int n, Random rnd) =>
+    words.length * 3 + 4;
 
 // ============================================================
 // VALIDATION
@@ -422,7 +401,7 @@ bool _isValid(GameLevel level) {
   }
 
   // Minimum four extra shots.
-  return level.maxShots >= level.totalRequiredLetters + 4;
+  return level.maxShots >= level.wordCount + 4;
 }
 
 // ============================================================
@@ -430,6 +409,15 @@ bool _isValid(GameLevel level) {
 // ============================================================
 
 GameLevel _createLevel(int n) {
+  if (n == 1)
+    return const GameLevel(
+      number: 1,
+      words: ['CAT'],
+      hints: ['Complete CA_'],
+      letters: ['C', 'A', 'T'],
+      maxShots: 7,
+    );
+
   final GameLevel? custom = levelOverrides[n];
 
   if (custom != null) {

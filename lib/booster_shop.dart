@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 
 import 'bloom_visuals.dart';
 
-import 'booster_service.dart';
+import 'billing_service.dart';
 import 'booster_bar.dart';
-import 'gift_service.dart';
+import 'booster_purchase_dialog.dart' show formatCoinCount;
+import 'booster_service.dart';
 import 'game_mode.dart';
+import 'gift_service.dart';
+import 'store_service.dart';
 import 'test_ads_service.dart';
 
 Future<void> showBoosterShop(
@@ -29,15 +32,11 @@ class _BoosterShop extends StatefulWidget {
   State<_BoosterShop> createState() => _BoosterShopState();
 }
 
-// UI-only price previews. Replace with localized store ProductDetails prices
-// when billing is integrated. Never grant a paid pack on a button tap.
-const _previewPrices = [100, 200, 300];
-const _singlePackAmounts = [3, 7, 12];
-
 class _BoosterShopState extends State<_BoosterShop> {
+  final BillingService _billing = BillingService.instance;
+  final StoreService _store = StoreService.instance;
+
   int _coins = 0;
-  // 0 = mixed bundles, 1 = coins, 2..6 = the five booster categories.
-  int _category = 0;
   BoosterId _adBooster = BoosterId.bloomBomb;
   bool _loading = true, _busy = false;
   String? _message;
@@ -46,28 +45,60 @@ class _BoosterShopState extends State<_BoosterShop> {
   void initState() {
     super.initState();
     final selected = widget.selected;
-    if (selected != null) {
-      _category = selected.index + 2;
-      _adBooster = selected;
-    }
+    if (selected != null) _adBooster = selected;
+    _billing.activeMode = widget.mode;
+    GiftService.coinTick.addListener(_refreshCoins);
+    _billing.addListener(_onBilling);
+    _store.addListener(_onStore);
     _load();
+    _billing.init();
+  }
+
+  @override
+  void dispose() {
+    GiftService.coinTick.removeListener(_refreshCoins);
+    _billing.removeListener(_onBilling);
+    _store.removeListener(_onStore);
+    super.dispose();
+  }
+
+  void _onStore() {
+    if (mounted) setState(() {});
+  }
+
+  void _onBilling() {
+    if (!mounted) return;
+    final String? m = _billing.takeMessage();
+    setState(() {
+      if (m != null) _message = m;
+    });
+  }
+
+  Future<void> _refreshCoins() async {
+    try {
+      final coins = await GiftService.getCoins(mode: widget.mode);
+      if (mounted) setState(() => _coins = coins);
+    } catch (_) {}
   }
 
   Future<void> _load() async {
     try {
       await BoosterService.instance.load();
+      await _store.load();
       final coins = await GiftService.getCoins(mode: widget.mode);
-      if (mounted)
+      if (mounted) {
         setState(() {
           _coins = coins;
           _loading = false;
         });
+      }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _loading = false;
           _message = 'Could not load balance. Please reopen the shop.';
         });
+      }
     }
   }
 
@@ -99,6 +130,13 @@ class _BoosterShopState extends State<_BoosterShop> {
     }
   }
 
+  // ---- Remove Ads: real money (Google Play), one time ----
+
+  Future<void> _removeAds() async {
+    if (_busy || _loading || _store.adsRemoved) return;
+    await _billing.buyRemoveAds();
+  }
+
   static const _rose = Color(0xFFB72C79);
   static const _ink = Color(0xFF74425D);
 
@@ -122,17 +160,8 @@ class _BoosterShopState extends State<_BoosterShop> {
         : CustomPaint(painter: BoosterIconPainter(id)),
   );
 
-  void _select(int index) {
-    if (_busy) return;
-    setState(() {
-      _category = index;
-      if (index >= 2) _adBooster = BoosterId.values[index - 2];
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
-    final reduceMotion = MediaQuery.of(context).disableAnimations;
     return PopScope(
       canPop: !_busy,
       child: SafeArea(
@@ -155,22 +184,13 @@ class _BoosterShopState extends State<_BoosterShop> {
                 child: Row(
                   children: [
                     const Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Bloom Shop',
-                            style: TextStyle(
-                              fontFamily: 'Fredoka',
-                              fontSize: 28,
-                              color: _rose,
-                            ),
-                          ),
-                          Text(
-                            'Little boosts for beautiful blooms',
-                            style: TextStyle(fontSize: 12, color: _ink),
-                          ),
-                        ],
+                      child: Text(
+                        'Bloom Shop',
+                        style: TextStyle(
+                          fontFamily: 'Fredoka',
+                          fontSize: 28,
+                          color: _rose,
+                        ),
                       ),
                     ),
                     BloomCloseButton(
@@ -188,84 +208,49 @@ class _BoosterShopState extends State<_BoosterShop> {
                 ),
                 child: Row(
                   children: [
-                    _icon(null, 24),
-                    const SizedBox(width: 6),
-                    Text(
-                      _loading ? '…' : '$_coins',
-                      style: const TextStyle(
-                        fontFamily: 'Fredoka',
-                        fontSize: 19,
-                        color: _ink,
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: const Color(0xFFECC6DC)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _icon(null, 24),
+                          const SizedBox(width: 6),
+                          Text(
+                            _loading ? '…' : formatCoinCount(_coins),
+                            style: const TextStyle(
+                              fontFamily: 'Fredoka',
+                              fontSize: 19,
+                              color: _ink,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                     const Spacer(),
-                    const Text(
-                      'YOUR BALANCE',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: _rose,
-                      ),
-                    ),
                   ],
                 ),
               ),
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.fromLTRB(14, 4, 14, 10),
-                child: Row(
-                  children: [
-                    for (var i = 0; i < 7; i++)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 7),
-                        child: ChoiceChip(
-                          selected: _category == i,
-                          onSelected: _busy ? null : (_) => _select(i),
-                          showCheckmark: false,
-                          avatar: i < 2
-                              ? Icon(
-                                  i == 0
-                                      ? Icons.card_giftcard_rounded
-                                      : Icons.monetization_on_rounded,
-                                  size: 18,
-                                  color: _category == i ? Colors.white : _rose,
-                                )
-                              : _icon(BoosterId.values[i - 2], 22),
-                          label: Text(
-                            i == 0
-                                ? 'Bundles'
-                                : i == 1
-                                ? 'Coins'
-                                : _name(BoosterId.values[i - 2]),
-                          ),
-                          labelStyle: TextStyle(
-                            fontFamily: 'Fredoka',
-                            color: _category == i ? Colors.white : _rose,
-                          ),
-                          selectedColor: _rose,
-                          backgroundColor: Colors.white,
-                          side: BorderSide(
-                            color: _category == i
-                                ? _rose
-                                : const Color(0xFFECC6DC),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
+              const SizedBox(height: 6),
               Expanded(
                 child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 22),
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 22),
                   child: Column(
                     children: [
-                      _adCard(),
+                      _removeAdsCard(),
                       const SizedBox(height: 18),
                       const Row(
                         children: [
                           Expanded(
                             child: Text(
-                              'BUNDLE OFFERS',
+                              'COIN BUNDLES',
                               style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w800,
@@ -281,16 +266,11 @@ class _BoosterShopState extends State<_BoosterShop> {
                         ],
                       ),
                       const SizedBox(height: 9),
-                      AnimatedSwitcher(
-                        duration: Duration(
-                          milliseconds: reduceMotion ? 0 : 240,
-                        ),
-                        child: Column(
-                          key: ValueKey(_category),
-                          children: [for (var i = 0; i < 3; i++) _pack(i)],
-                        ),
-                      ),
-                      if (_busy)
+                      for (var i = 0; i < kCoinPacks.length; i++)
+                        _coinPack(i),
+                      const SizedBox(height: 4),
+                      _adCard(),
+                      if (_busy || _billing.purchasingProductId != null)
                         const Padding(
                           padding: EdgeInsets.all(12),
                           child: LinearProgressIndicator(color: _rose),
@@ -321,7 +301,91 @@ class _BoosterShopState extends State<_BoosterShop> {
     );
   }
 
+  Widget _removeAdsCard() {
+    final bool owned = _store.adsRemoved;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: Colors.white, width: 2),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: owned
+              ? const [Color(0xFFBFEBD3), Color(0xFF6FCB9C)]
+              : const [Color(0xFFFFD6EA), Color(0xFFE98BC3)],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: _rose.withValues(alpha: .16),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.white,
+            ),
+            child: Icon(
+              owned ? Icons.check_rounded : Icons.block_rounded,
+              color: owned ? const Color(0xFF2E9E62) : _rose,
+              size: 28,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  owned ? 'Ads Removed' : 'Remove Ads',
+                  style: const TextStyle(
+                    fontFamily: 'Fredoka',
+                    fontSize: 20,
+                    color: Colors.white,
+                    shadows: [Shadow(color: Color(0x66000000), blurRadius: 3)],
+                  ),
+                ),
+                Text(
+                  owned
+                      ? 'Thank you! No more ads, forever.'
+                      : 'One-time purchase. No more ads, forever.',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (!owned) ...[
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 118,
+              child: _ShinyBuyButton(
+                label: _billing.purchasingProductId == kRemoveAdsProductId
+                    ? 'WAIT…'
+                    : _billing.removeAdsPriceLabel,
+                onTap: (_busy || _loading || _billing.purchasingProductId != null)
+                    ? null
+                    : _removeAds,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _adCard() => Container(
+    margin: const EdgeInsets.only(top: 6),
     padding: const EdgeInsets.all(14),
     decoration: BoxDecoration(
       color: Colors.white,
@@ -409,40 +473,16 @@ class _BoosterShopState extends State<_BoosterShop> {
     ),
   );
 
-  Widget _reward(BoosterId? id, int amount) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
-    decoration: BoxDecoration(
-      color: Colors.white.withValues(alpha: .94),
-      borderRadius: BorderRadius.circular(12),
-    ),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _icon(id, 25),
-        const SizedBox(width: 6),
-        Text(
-          '$amount ${id == null ? 'Coins' : _name(id)}',
-          style: const TextStyle(
-            color: _ink,
-            fontSize: 12,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ],
-    ),
-  );
-
-  Widget _pack(int index) {
-    final isMixed = _category == 0;
-    final isCoins = _category == 1;
-    final id = _category >= 2 ? BoosterId.values[_category - 2] : null;
-    final accent = index == 1
+  Widget _coinPack(int index) {
+    final CoinPack pack = kCoinPacks[index];
+    final bool buying = _billing.purchasingProductId == pack.productId;
+    final bool anyBuying = _billing.purchasingProductId != null;
+    final accent = index.isOdd
         ? const Color(0xFFA651BD)
         : const Color(0xFFCA367E);
-    final title = isMixed
-        ? ['Starter Bundle', 'Bloom Bundle', 'Garden Bundle'][index]
-        : '${isCoins ? 'Coin' : _name(id!)} Pack';
-    final coinAmount = isMixed ? (index + 1) * 100 : [500, 1200, 2000][index];
+    final String? tag = index == 2
+        ? 'POPULAR'
+        : (index == kCoinPacks.length - 1 ? 'BEST VALUE' : null);
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
       decoration: BoxDecoration(
@@ -466,28 +506,70 @@ class _BoosterShopState extends State<_BoosterShop> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              title,
-              style: const TextStyle(
-                fontFamily: 'Fredoka',
-                fontSize: 22,
-                color: Colors.white,
-              ),
-            ),
-            const SizedBox(height: 10),
             Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Expanded(
-                  child: Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (isMixed || isCoins) _reward(null, coinAmount),
-                      if (isMixed)
-                        for (final booster in BoosterId.values)
-                          _reward(booster, index + 1),
-                      if (id != null) _reward(id, _singlePackAmounts[index]),
+                      if (tag != null)
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 6),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 9,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFE27A),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            tag,
+                            style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 1,
+                              color: Color(0xFF7A4A00),
+                            ),
+                          ),
+                        ),
+                      Row(
+                        children: [
+                          _icon(null, 30),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                formatCoinCount(pack.coins),
+                                style: const TextStyle(
+                                  fontFamily: 'Fredoka',
+                                  fontSize: 34,
+                                  color: Colors.white,
+                                  shadows: [
+                                    Shadow(
+                                      color: Color(0x66000000),
+                                      blurRadius: 3,
+                                      offset: Offset(0, 1),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const Text(
+                        'COINS',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.4,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -495,53 +577,14 @@ class _BoosterShopState extends State<_BoosterShop> {
                 SizedBox(
                   width: 92,
                   height: 108,
-                  child: Stack(
-                    children: [
-                      const Positioned.fill(
-                        child: CustomPaint(painter: _TreasurePainter()),
-                      ),
-                      if (!isCoins)
-                        Positioned(
-                          right: 0,
-                          bottom: 0,
-                          child: _icon(id ?? BoosterId.flowerBlast, 38),
-                        ),
-                    ],
-                  ),
+                  child: const CustomPaint(painter: _TreasurePainter()),
                 ),
               ],
             ),
-            const SizedBox(height: 13),
+            const SizedBox(height: 10),
             _ShinyBuyButton(
-              label: 'BUY · PKR ${_previewPrices[index]}',
-              onTap: _busy
-                  ? null
-                  : () => showDialog<void>(
-                      context: context,
-                      builder: (dialogContext) => AlertDialog(
-                        backgroundColor: const Color(0xFFFFF0F7),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(24),
-                        ),
-                        title: const Text(
-                          'Bloom Shop',
-                          style: TextStyle(fontFamily: 'Fredoka', color: _rose),
-                        ),
-                        content: const Text(
-                          'Purchases aren’t available yet.',
-                          style: TextStyle(color: _ink),
-                        ),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(dialogContext),
-                            child: const Text(
-                              'OK',
-                              style: TextStyle(color: _rose),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+              label: buying ? 'WAITING…' : 'BUY · ${_billing.priceLabel(pack)}',
+              onTap: (_busy || anyBuying) ? null : () => _billing.buy(pack),
             ),
           ],
         ),
@@ -676,7 +719,7 @@ class _ShinyBuyButtonState extends State<_ShinyBuyButton>
   );
 }
 
-/// Small code-drawn treasure illustration: open chest, gold rim and coin piles.
+/// Booster chest with glossy pink gems.
 class _TreasurePainter extends CustomPainter {
   const _TreasurePainter();
   @override
@@ -726,50 +769,23 @@ class _TreasurePainter extends CustomPainter {
       const Color(0xFFFFF1A0),
       const Color(0xFFFFBE32),
     ], 3);
-    void coin(double x, double y, double r) {
-      final rect = Rect.fromCircle(center: Offset(x, y), radius: r);
-      p.shader = const LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [Color(0xFFFFF6A1), Color(0xFFFFCA35), Color(0xFFECA11B)],
-      ).createShader(rect);
-      canvas.drawCircle(Offset(x, y), r, p);
-      p.shader = null;
-      canvas.drawCircle(
-        Offset(x, y),
-        r * .73,
-        p
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.6
-          ..color = const Color(0xFFD99418),
-      );
-      p.style = PaintingStyle.fill;
-      canvas.drawArc(
-        Rect.fromCircle(center: Offset(x, y), radius: r * .78),
-        3.4,
-        1.4,
-        false,
-        p
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.8
-          ..color = const Color(0xFFFFF8CD),
-      );
-      p.style = PaintingStyle.fill;
-    }
-
-    for (final c in const [
-      [30.0, 43.0, 10.0],
-      [48.0, 39.0, 12.0],
-      [65.0, 44.0, 10.0],
-      [40.0, 49.0, 9.0],
-      [62.0, 52.0, 10.0],
-      [17.0, 90.0, 11.0],
-      [34.0, 96.0, 10.0],
-      [51.0, 92.0, 11.0],
-      [69.0, 98.0, 9.0],
-      [5.0, 98.0, 7.0],
+    for (final gem in const [
+      [28.0, 43.0],
+      [45.0, 37.0],
+      [62.0, 43.0],
+      [16.0, 96.0],
+      [34.0, 98.0],
     ]) {
-      coin(c[0], c[1], c[2]);
+      final rect = Rect.fromCircle(center: Offset(gem[0], gem[1]), radius: 9);
+      p.shader = const RadialGradient(
+        colors: [Color(0xFFFFEAF8), Color(0xFFEC69B4), Color(0xFF9250BE)],
+      ).createShader(rect);
+      canvas.drawCircle(rect.center, 9, p);
+      p.shader = null;
+      canvas.drawOval(
+        Rect.fromLTWH(gem[0] - 5, gem[1] - 6, 7, 3),
+        p..color = Colors.white,
+      );
     }
     box(const Rect.fromLTWH(46, 61, 12, 16), [
       const Color(0xFFFFEF9D),

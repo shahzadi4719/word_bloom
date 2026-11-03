@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
+import 'store_service.dart';
+
 enum TestAdResult {
   rewarded,
   skipped,
@@ -34,6 +36,10 @@ class TestAdsService {
         _loadingInterstitial) {
       return;
     }
+    // Remove Ads is permanent: never even load an interstitial.
+    await StoreService.instance.load();
+    if (StoreService.instance.adsRemoved) return;
+    if (_interstitial != null || _loadingInterstitial) return;
     _loadingInterstitial = true;
     try {
       _initialization ??= MobileAds.instance.initialize();
@@ -75,6 +81,13 @@ class TestAdsService {
   /// If not ready, continue immediately; never show a late ad mid-level.
   Future<bool> showInterstitialAfterLevel(int completedLevel) async {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.android || _busy) {
+      return false;
+    }
+    await StoreService.instance.load();
+    if (StoreService.instance.adsRemoved) {
+      // Drop any ad that was cached before the purchase.
+      _interstitial?.dispose();
+      _interstitial = null;
       return false;
     }
     if (completedLevel < 1 || completedLevel.isOdd) {
